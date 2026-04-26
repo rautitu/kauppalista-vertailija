@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: kauppalista
       POSTGRES_PASSWORD: kauppalista
     ports:
-      - "55432:5432"
+      - "51110:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kauppalista -d kauppalista"]
       interval: 5s

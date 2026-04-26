@@ -22,4 +22,11 @@ Palvelut:
 
 - Web: http://localhost:3000
 - API health: http://localhost:3001/health
-- Postgres: `localhost:55432`
+- Postgres: `localhost:51110`
+
+## Porttikäytäntö
+
+Tälle projektille varatut portit noudattavat `5111*`-sarjaa aina kun projektille lisätään uusia verkkoportteja.
+
+Nykyinen varaus:
+- Postgres host-portti: `51110`
