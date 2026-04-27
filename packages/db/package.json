@@ -9,7 +9,7 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "db:migrate": "bun src/cli.ts migrate",
-    "db:seed": "bun src/cli.ts seed",
+    "db:seed:test": "bun src/cli.ts seed",
     "test": "bun test src/db.integration.test.ts"
   },
   "dependencies": {

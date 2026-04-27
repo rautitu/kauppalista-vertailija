@@ -1,3 +1,7 @@
+-- Test/dev seed data only.
+-- Do not run this in production builds or as part of the production deployment pipeline.
+-- Intended for local development, integration tests, and bootstrapping a disposable database.
+
 INSERT INTO stores (id, source, external_id, name, city, address, postal_code)
 VALUES
   ('11111111-1111-1111-1111-111111111111', 'k-ruoka', 'k-supermarket-keskusta', 'K-Supermarket Keskusta', 'Tampere', 'Hämeenkatu 10', '33100'),
