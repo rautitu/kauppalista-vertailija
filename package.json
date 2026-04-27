@@ -12,6 +12,9 @@
     "dev:worker": "bun run --filter @kauppalista/worker dev",
     "build": "bun run --filter '*' build",
     "check": "bun run --filter '*' check",
-    "test:domain": "bun run --filter @kauppalista/domain test"
+    "db:migrate": "bun run --filter @kauppalista/db db:migrate",
+    "db:seed": "bun run --filter @kauppalista/db db:seed",
+    "test:domain": "bun run --filter @kauppalista/domain test",
+    "test:db": "bun run --filter @kauppalista/db test"
   }
 }
