@@ -1,6 +1,6 @@
 import { Client } from 'pg';
 
-const databaseUrl = process.env.DATABASE_URL ?? 'postgresql://kauppalista:kauppalista@localhost:5432/kauppalista';
+const databaseUrl = process.env.DATABASE_URL ?? 'postgresql://kauppalista:kauppalista@localhost:51110/kauppalista';
 
 export async function checkDatabaseHealth() {
   const client = new Client({ connectionString: databaseUrl });
