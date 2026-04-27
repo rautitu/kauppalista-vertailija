@@ -1,0 +1,57 @@
+[
+  {
+    "externalId": "k-citymarket-tammisto",
+    "storeName": "K-Citymarket Tammisto",
+    "city": "Vantaa",
+    "address": "Antaksentie 4",
+    "postalCode": "01510",
+    "metadata": {
+      "chain": "K-Citymarket",
+      "source": "bundled-fixture"
+    }
+  },
+  {
+    "externalId": "k-citymarket-lielahti",
+    "storeName": "K-Citymarket Lielahti",
+    "city": "Tampere",
+    "address": "Possijärvenkatu 1",
+    "postalCode": "33400",
+    "metadata": {
+      "chain": "K-Citymarket",
+      "source": "bundled-fixture"
+    }
+  },
+  {
+    "externalId": "k-supermarket-keskusta",
+    "storeName": "K-Supermarket Keskusta",
+    "city": "Tampere",
+    "address": "Hämeenkatu 10",
+    "postalCode": "33100",
+    "metadata": {
+      "chain": "K-Supermarket",
+      "source": "bundled-fixture"
+    }
+  },
+  {
+    "externalId": "k-supermarket-redi",
+    "storeName": "K-Supermarket Redi",
+    "city": "Helsinki",
+    "address": "Hermannin rantatie 5",
+    "postalCode": "00580",
+    "metadata": {
+      "chain": "K-Supermarket",
+      "source": "bundled-fixture"
+    }
+  },
+  {
+    "externalId": "k-market-ruoholahti",
+    "storeName": "K-Market Ruoholahti",
+    "city": "Helsinki",
+    "address": "Itämerenkatu 21",
+    "postalCode": "00180",
+    "metadata": {
+      "chain": "K-Market",
+      "source": "bundled-fixture"
+    }
+  }
+]
