@@ -1,32 +1,32 @@
 # kauppalista-vertailija
 
-Vaiheen 1 perustus kauppalista-vertailijalle.
+Phase 1 foundation for the shopping list comparison tool.
 
-## Sisältö
+## Contents
 
-- Bun workspace -monorepo
+- Bun workspace monorepo
 - `apps/web` (Next.js)
 - `apps/api` (Bun + Hono)
-- `apps/worker` (worker-skeleton)
+- `apps/worker` (worker skeleton)
 - `packages/domain`, `packages/searchers`, `packages/matcher`, `packages/db`
-- Docker Compose palveluille `postgres`, `api`, `web`, `worker`
+- Docker Compose services for `postgres`, `api`, `web`, and `worker`
 
-## Käynnistys
+## Getting started
 
 ```bash
 bun install
 docker compose up --build
 ```
 
-Palvelut:
+Services:
 
 - Web: http://localhost:3000
 - API health: http://localhost:3001/health
 - Postgres: `localhost:51110`
 
-## Porttikäytäntö
+## Port policy
 
-Tälle projektille varatut portit noudattavat `5111*`-sarjaa aina kun projektille lisätään uusia verkkoportteja.
+Ports reserved for this project should always follow the `5111*` series whenever new network ports are added.
 
-Nykyinen varaus:
-- Postgres host-portti: `51110`
+Current reservation:
+- Postgres host port: `51110`
