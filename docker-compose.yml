@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: kauppalista
+      POSTGRES_USER: kauppalista
+      POSTGRES_PASSWORD: kauppalista
+    ports:
+      - "51110:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kauppalista -d kauppalista"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: ./infra/docker/api.Dockerfile
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:3001/health').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: ./infra/docker/web.Dockerfile
+    environment:
+      PORT: 3000
+      API_BASE_URL: http://api:3001
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:3000').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: ./infra/docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
