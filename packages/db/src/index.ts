@@ -66,6 +66,20 @@ export type SearchLogRecord = {
   responsePayload?: unknown;
 };
 
+export type StoreRecord = {
+  id: string;
+  source: 'k-ruoka' | 's-kaupat';
+  externalId: string;
+  name: string;
+  city?: string | null;
+  address?: string | null;
+  postalCode?: string | null;
+  isActive: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type StoreUpsertRecord = Omit<StoreRecord, 'id'>;
+
 function quoteIdentifier(identifier: string) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
     throw new Error(`Invalid SQL identifier: ${identifier}`);
@@ -240,6 +254,107 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
           alias: result.rows[0].alias,
           aliasType: result.rows[0].alias_type,
         };
+      }),
+
+    syncStores: (source: 'k-ruoka' | 's-kaupat', stores: StoreUpsertRecord[]) =>
+      withClient(async (client) => {
+        await client.query('BEGIN');
+
+        try {
+          for (const store of stores) {
+            await client.query(
+              `
+                INSERT INTO stores (source, external_id, name, city, address, postal_code, is_active, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                ON CONFLICT (source, external_id)
+                DO UPDATE SET
+                  name = EXCLUDED.name,
+                  city = EXCLUDED.city,
+                  address = EXCLUDED.address,
+                  postal_code = EXCLUDED.postal_code,
+                  is_active = EXCLUDED.is_active,
+                  metadata = EXCLUDED.metadata,
+                  updated_at = NOW()
+              `,
+              [
+                source,
+                store.externalId,
+                store.name,
+                store.city ?? null,
+                store.address ?? null,
+                store.postalCode ?? null,
+                store.isActive,
+                JSON.stringify(store.metadata ?? {}),
+              ],
+            );
+          }
+
+          const activeExternalIds = stores.map((store) => store.externalId);
+          if (activeExternalIds.length > 0) {
+            await client.query(
+              `
+                UPDATE stores
+                SET is_active = FALSE,
+                    updated_at = NOW()
+                WHERE source = $1
+                  AND external_id <> ALL($2::text[])
+              `,
+              [source, activeExternalIds],
+            );
+          } else {
+            await client.query(
+              `
+                UPDATE stores
+                SET is_active = FALSE,
+                    updated_at = NOW()
+                WHERE source = $1
+              `,
+              [source],
+            );
+          }
+
+          await client.query('COMMIT');
+          return { synced: stores.length };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      }),
+
+    listStores: (source?: 'k-ruoka' | 's-kaupat', includeInactive = false) =>
+      withClient(async (client) => {
+        const result = await client.query<{
+          id: string;
+          source: 'k-ruoka' | 's-kaupat';
+          external_id: string;
+          name: string;
+          city: string | null;
+          address: string | null;
+          postal_code: string | null;
+          is_active: boolean;
+          metadata: Record<string, unknown>;
+        }>(
+          `
+            SELECT id, source, external_id, name, city, address, postal_code, is_active, metadata
+            FROM stores
+            WHERE ($1::text IS NULL OR source = $1)
+              AND ($2::boolean OR is_active = TRUE)
+            ORDER BY source ASC, name ASC
+          `,
+          [source ?? null, includeInactive],
+        );
+
+        return result.rows.map((row) => ({
+          id: row.id,
+          source: row.source,
+          externalId: row.external_id,
+          name: row.name,
+          city: row.city,
+          address: row.address,
+          postalCode: row.postal_code,
+          isActive: row.is_active,
+          metadata: row.metadata,
+        })) satisfies StoreRecord[];
       }),
 
     getCanonicalItemWithAliases: (id: string) =>
