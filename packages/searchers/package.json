@@ -6,8 +6,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
-    "check": "tsc --noEmit -p tsconfig.json"
+    "build": "bunx tsc --noEmit -p tsconfig.json",
+    "check": "bunx tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
   },
   "dependencies": {
     "@kauppalista/domain": "workspace:*"

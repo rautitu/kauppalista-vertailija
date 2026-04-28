@@ -1,9 +1,41 @@
-import type { Store, StoreSource } from '@kauppalista/domain';
+import type { Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
 import keskoFallbackStores from './fixtures/kesko-stores.json';
 
+export type ProductSearchRequest = {
+  storeId: string;
+  query: string;
+  limit?: number;
+  signal?: AbortSignal;
+};
+
+export type ProductSearchResult = {
+  source: StoreSource;
+  storeId: string;
+  query: string;
+  candidates: StoreProductCandidate[];
+  rawResponse: unknown;
+};
+
 export interface ProductSearcher {
-  source: 'k-ruoka' | 's-kaupat';
+  source: StoreSource;
+  searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult>;
 }
+
+export type FetchLike = (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>;
+
+export type SearcherHttpOptions = {
+  fetchImpl?: FetchLike;
+  signal?: AbortSignal;
+  userAgent?: string;
+};
+
+export type KeskoSearcherOptions = SearcherHttpOptions & {
+  searchUrl?: string;
+};
+
+export type SGroupSearcherOptions = SearcherHttpOptions & {
+  searchUrl?: string;
+};
 
 export type StoreDirectoryRecord = {
   source: StoreSource;
@@ -17,8 +49,9 @@ export type StoreDirectoryRecord = {
 };
 
 export type StoreDirectoryFetcherOptions = {
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchLike;
   signal?: AbortSignal;
+  userAgent?: string;
   keskoDirectoryUrl?: string;
   sGroupSitemapUrl?: string;
   sGroupConcurrency?: number;
@@ -26,8 +59,11 @@ export type StoreDirectoryFetcherOptions = {
 };
 
 const DEFAULT_S_GROUP_SITEMAP_URL = 'https://www.s-kaupat.fi/sitemap_stores_0.xml';
+const DEFAULT_KESKO_SEARCH_URL = 'https://www.k-ruoka.fi/api/search';
+const DEFAULT_S_GROUP_SEARCH_URL = 'https://www.s-kaupat.fi/api/products/search';
+const DEFAULT_USER_AGENT = 'kauppalista-vertailija/phase-5-product-searchers';
 
-function getFetch(fetchImpl?: typeof fetch) {
+function getFetch(fetchImpl?: FetchLike) {
   return fetchImpl ?? fetch;
 }
 
@@ -64,13 +100,17 @@ function dedupeStores(stores: StoreDirectoryRecord[]) {
   });
 }
 
-async function fetchText(url: string, options: StoreDirectoryFetcherOptions = {}) {
+function createHeaders(userAgent = DEFAULT_USER_AGENT) {
+  return {
+    'user-agent': userAgent,
+    accept: 'application/json,text/html,application/xml,text/xml;q=0.9,*/*;q=0.8',
+  };
+}
+
+async function fetchText(url: string, options: StoreDirectoryFetcherOptions | SearcherHttpOptions = {}) {
   const response = await getFetch(options.fetchImpl)(url, {
     signal: options.signal,
-    headers: {
-      'user-agent': 'kauppalista-vertailija/phase-4-store-directory',
-      accept: 'text/html,application/xml,text/xml,application/json;q=0.9,*/*;q=0.8',
-    },
+    headers: createHeaders(options.userAgent),
   });
 
   if (!response.ok) {
@@ -78,6 +118,19 @@ async function fetchText(url: string, options: StoreDirectoryFetcherOptions = {}
   }
 
   return response.text();
+}
+
+async function fetchJson(url: string, options: SearcherHttpOptions = {}) {
+  const response = await getFetch(options.fetchImpl)(url, {
+    signal: options.signal,
+    headers: createHeaders(options.userAgent),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url} with status ${response.status}`);
+  }
+
+  return response.json() as Promise<unknown>;
 }
 
 function parseSitemapUrls(xml: string) {
@@ -197,6 +250,251 @@ function mapKeskoFixture(input: Array<Record<string, unknown>>): StoreDirectoryR
       source: store.source ?? 'fixture',
     },
   }));
+}
+
+function toNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.replace(',', '.').trim();
+    if (normalized.length === 0) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function readObject(value: unknown) {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function readStringField(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') {
+      const normalized = normalizeText(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  return null;
+}
+
+function readNumberField(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = toNumber(record[key]);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function inferSizeAndUnit(record: Record<string, unknown>, name: string) {
+  const size = readNumberField(record, 'size', 'packageSize', 'netContent', 'amount', 'volume', 'weight');
+  const unit = readStringField(record, 'unit', 'salesUnit', 'measurementUnit', 'packageUnit');
+
+  if (size !== null || unit) {
+    return {
+      size,
+      unit,
+    };
+  }
+
+  const nameMatch = name.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|l|dl|cl|ml|kpl|pkt|ps|rs)/i);
+  if (!nameMatch) {
+    return {
+      size: null,
+      unit: null,
+    };
+  }
+
+  return {
+    size: Number(nameMatch[1]!.replace(',', '.')),
+    unit: nameMatch[2]!.toLowerCase(),
+  };
+}
+
+function readPriceValue(value: unknown) {
+  if (typeof value === 'number' || typeof value === 'string') {
+    return toNumber(value);
+  }
+
+  const record = readObject(value);
+  if (!record) {
+    return null;
+  }
+
+  return readNumberField(record, 'value', 'amount', 'price');
+}
+
+function readComparisonPrice(value: unknown) {
+  if (typeof value === 'number' || typeof value === 'string') {
+    return toNumber(value);
+  }
+
+  const record = readObject(value);
+  if (!record) {
+    return null;
+  }
+
+  return readNumberField(record, 'value', 'amount', 'price');
+}
+
+function mapKeskoProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
+  const name = readStringField(product, 'name', 'productName', 'title');
+  if (!name) {
+    throw new Error('Kesko product is missing name');
+  }
+
+  const productId = readStringField(product, 'id', 'productId', 'ean') ?? name;
+  const price = readPriceValue(product.price) ?? readNumberField(product, 'price', 'salePrice', 'currentPrice');
+  if (price === null) {
+    throw new Error(`Kesko product ${productId} is missing price`);
+  }
+
+  const { size, unit } = inferSizeAndUnit(product, name);
+
+  return {
+    source: 'k-ruoka',
+    storeId,
+    productId,
+    name,
+    brand: readStringField(product, 'brand', 'brandName', 'manufacturer'),
+    size,
+    unit,
+    price,
+    comparisonPrice: readComparisonPrice(product.comparisonPrice),
+    rawPayload: product,
+  };
+}
+
+function mapSGroupProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
+  const name = readStringField(product, 'name', 'productName', 'title');
+  if (!name) {
+    throw new Error('S-group product is missing name');
+  }
+
+  const productId = readStringField(product, 'id', 'productId', 'ean', 'sku') ?? name;
+  const price = readPriceValue(product.price) ?? readNumberField(product, 'price', 'salePrice', 'currentPrice');
+  if (price === null) {
+    throw new Error(`S-group product ${productId} is missing price`);
+  }
+
+  const measurement = readObject(product.measurement);
+  const size = measurement ? readNumberField(measurement, 'value', 'amount') : null;
+  const unit = measurement ? readStringField(measurement, 'unit') : null;
+  const inferred = size !== null || unit ? { size, unit } : inferSizeAndUnit(product, name);
+
+  return {
+    source: 's-kaupat',
+    storeId,
+    productId,
+    name,
+    brand: readStringField(product, 'brand', 'brandName', 'manufacturer'),
+    size: inferred.size,
+    unit: inferred.unit,
+    price,
+    comparisonPrice: readComparisonPrice(product.comparisonPrice),
+    rawPayload: product,
+  };
+}
+
+function ensureArrayResponse(payload: unknown, paths: string[][], source: string) {
+  const root = readObject(payload);
+
+  for (const path of paths) {
+    let current: unknown = root;
+
+    for (const key of path) {
+      current = readObject(current)?.[key];
+    }
+
+    if (Array.isArray(current)) {
+      return current as Array<Record<string, unknown>>;
+    }
+  }
+
+  throw new Error(`${source} search response did not contain a product array`);
+}
+
+export function mapKeskoSearchResponse(storeId: string, payload: unknown): StoreProductCandidate[] {
+  const items = ensureArrayResponse(payload, [['products'], ['items'], ['results'], ['data', 'products']], 'Kesko');
+  return items.map((item) => mapKeskoProduct(storeId, item));
+}
+
+export function mapSGroupSearchResponse(storeId: string, payload: unknown): StoreProductCandidate[] {
+  const items = ensureArrayResponse(payload, [['products'], ['items'], ['results'], ['hits'], ['data', 'products']], 'S-group');
+  return items.map((item) => mapSGroupProduct(storeId, item));
+}
+
+export class KeskoSearcher implements ProductSearcher {
+  readonly source = 'k-ruoka' as const;
+
+  constructor(private readonly options: KeskoSearcherOptions = {}) {}
+
+  async searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult> {
+    const baseUrl = this.options.searchUrl ?? process.env.KESKO_PRODUCTS_URL ?? DEFAULT_KESKO_SEARCH_URL;
+    const url = new URL(baseUrl);
+    url.searchParams.set('storeId', request.storeId);
+    url.searchParams.set('q', request.query);
+    if (request.limit) {
+      url.searchParams.set('limit', String(request.limit));
+    }
+
+    const rawResponse = await fetchJson(url.toString(), {
+      fetchImpl: this.options.fetchImpl,
+      signal: request.signal ?? this.options.signal,
+      userAgent: this.options.userAgent,
+    });
+
+    return {
+      source: this.source,
+      storeId: request.storeId,
+      query: request.query,
+      candidates: mapKeskoSearchResponse(request.storeId, rawResponse),
+      rawResponse,
+    };
+  }
+}
+
+export class SGroupSearcher implements ProductSearcher {
+  readonly source = 's-kaupat' as const;
+
+  constructor(private readonly options: SGroupSearcherOptions = {}) {}
+
+  async searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult> {
+    const baseUrl = this.options.searchUrl ?? process.env.S_GROUP_PRODUCTS_URL ?? DEFAULT_S_GROUP_SEARCH_URL;
+    const url = new URL(baseUrl);
+    url.searchParams.set('storeId', request.storeId);
+    url.searchParams.set('q', request.query);
+    if (request.limit) {
+      url.searchParams.set('limit', String(request.limit));
+    }
+
+    const rawResponse = await fetchJson(url.toString(), {
+      fetchImpl: this.options.fetchImpl,
+      signal: request.signal ?? this.options.signal,
+      userAgent: this.options.userAgent,
+    });
+
+    return {
+      source: this.source,
+      storeId: request.storeId,
+      query: request.query,
+      candidates: mapSGroupSearchResponse(request.storeId, rawResponse),
+      rawResponse,
+    };
+  }
 }
 
 async function loadKeskoStoresFromUrl(url: string, options: StoreDirectoryFetcherOptions) {

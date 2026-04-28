@@ -1,0 +1,28 @@
+{
+  "products": [
+    {
+      "id": "2000524300000",
+      "name": "Valio Kevytmaito 1 l",
+      "brandName": "Valio",
+      "price": 1.19,
+      "comparisonPrice": 1.19,
+      "packageSize": 1,
+      "salesUnit": "l",
+      "ean": "6408430000000",
+      "category": "Maidot"
+    },
+    {
+      "id": "2000524300001",
+      "name": "Valio Kevytmaito laktoositon 1 l",
+      "brand": "Valio",
+      "price": {
+        "value": 1.35
+      },
+      "comparisonPrice": {
+        "value": 1.35
+      },
+      "size": 1,
+      "unit": "l"
+    }
+  ]
+}
