@@ -64,30 +64,126 @@ describe('product searchers', () => {
     ]);
   });
 
-  test('maps S-group search responses into store product candidates', async () => {
-    const seenUrls: string[] = [];
+  test('maps real Kesko v2 responses into store product candidates', () => {
+    const [candidate] = mapKeskoSearchResponse('k-citymarket-lielahti', {
+      result: [
+        {
+          id: '6408430000142',
+          product: {
+            id: '6408430000142',
+            ean: '6408430000142',
+            localizedName: {
+              finnish: 'Valio Luomu kevytmaito 1l',
+            },
+            brand: {
+              name: 'Valio',
+            },
+            productAttributes: {
+              measurements: {
+                contentSize: 1,
+                contentUnit: 'l',
+              },
+            },
+            mobilescan: {
+              pricing: {
+                normal: {
+                  price: 1.44,
+                  unitPrice: {
+                    value: 1.44,
+                    unit: 'l',
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(candidate).toEqual({
+      source: 'k-ruoka',
+      storeId: 'k-citymarket-lielahti',
+      productId: '6408430000142',
+      name: 'Valio Luomu kevytmaito 1l',
+      brand: 'Valio',
+      size: 1,
+      unit: 'l',
+      price: 1.44,
+      comparisonPrice: 1.44,
+      rawPayload: {
+        id: '6408430000142',
+        product: {
+          id: '6408430000142',
+          ean: '6408430000142',
+          localizedName: {
+            finnish: 'Valio Luomu kevytmaito 1l',
+          },
+          brand: {
+            name: 'Valio',
+          },
+          productAttributes: {
+            measurements: {
+              contentSize: 1,
+              contentUnit: 'l',
+            },
+          },
+          mobilescan: {
+            pricing: {
+              normal: {
+                price: 1.44,
+                unitPrice: {
+                  value: 1.44,
+                  unit: 'l',
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  test('maps S-group GraphQL responses into store product candidates', async () => {
+    const seenRequests: Array<{ url: string; init?: RequestInit }> = [];
     const searcher = new SGroupSearcher({
       searchUrl: 'https://example.test/s-group-search',
-      fetchImpl: async (input) => {
-        seenUrls.push(String(input));
-        return createJsonResponse(sGroupFixture);
+      fetchImpl: async (input, init) => {
+        seenRequests.push({ url: String(input), init });
+        return createJsonResponse({
+          data: {
+            store: {
+              products: {
+                total: sGroupFixture.results.length,
+                items: sGroupFixture.results,
+              },
+            },
+          },
+        });
       },
     });
 
     const result = await searcher.searchProducts({
-      storeId: 'prisma-koivistonkylä',
+      storeId: '516079340',
       query: 'banaani',
     });
 
-    expect(seenUrls).toHaveLength(1);
-    expect(seenUrls[0]).toContain('storeId=prisma-koivistonkyl%C3%A4');
-    expect(seenUrls[0]).toContain('q=banaani');
+    expect(seenRequests).toHaveLength(1);
+    expect(seenRequests[0]?.url).toBe('https://example.test/s-group-search');
+    expect(seenRequests[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(String(seenRequests[0]?.init?.body))).toMatchObject({
+      operationName: 'RemoteFilteredProducts',
+      variables: {
+        storeId: '516079340',
+        queryString: 'banaani',
+        limit: 24,
+        from: 0,
+      },
+    });
     expect(result.source).toBe('s-kaupat');
-    expect(result.rawResponse).toEqual(sGroupFixture);
     expect(result.candidates).toEqual([
       {
         source: 's-kaupat',
-        storeId: 'prisma-koivistonkylä',
+        storeId: '516079340',
         productId: '101010',
         name: 'Kotimaista Banaani',
         brand: 'Kotimaista',
@@ -99,7 +195,7 @@ describe('product searchers', () => {
       },
       {
         source: 's-kaupat',
-        storeId: 'prisma-koivistonkylä',
+        storeId: '516079340',
         productId: '101011',
         name: 'Chiquita Banaani 900 g',
         brand: 'Chiquita',

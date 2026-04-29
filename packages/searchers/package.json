@@ -12,7 +12,8 @@
     "test:actual:valio-kevyt-maito": "RUN_ACTUAL_SEARCHER_TESTS=true bun test ./src/searchers.test.actual.valio.kevyt.maito.ts"
   },
   "dependencies": {
-    "@kauppalista/domain": "workspace:*"
+    "@kauppalista/domain": "workspace:*",
+    "playwright-core": "^1.59.1"
   },
   "devDependencies": {
     "bun-types": "^1.3.9",

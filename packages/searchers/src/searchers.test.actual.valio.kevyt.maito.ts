@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-// Live network tests are opt-in because external store APIs are flaky and may
-// block headless traffic (for example K-Ruoka currently returns HTTP 403 here).
+// Live network tests are opt-in because external store APIs are flaky and rely
+// on network/browser behavior that may vary by environment.
 
 import { KeskoSearcher, SGroupSearcher } from './index';
 
