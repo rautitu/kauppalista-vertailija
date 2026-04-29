@@ -324,7 +324,7 @@ function inferSizeAndUnit(record: Record<string, unknown>, name: string) {
   };
 }
 
-function readPriceValue(value: unknown) {
+function readMonetaryValue(value: unknown) {
   if (typeof value === 'number' || typeof value === 'string') {
     return toNumber(value);
   }
@@ -337,17 +337,12 @@ function readPriceValue(value: unknown) {
   return readNumberField(record, 'value', 'amount', 'price');
 }
 
-function readComparisonPrice(value: unknown) {
-  if (typeof value === 'number' || typeof value === 'string') {
-    return toNumber(value);
-  }
-
-  const record = readObject(value);
-  if (!record) {
-    return null;
-  }
-
-  return readNumberField(record, 'value', 'amount', 'price');
+function readProductPrice(product: Record<string, unknown>) {
+  return (
+    readMonetaryValue(product.salePrice) ??
+    readMonetaryValue(product.currentPrice) ??
+    readMonetaryValue(product.price)
+  );
 }
 
 function mapKeskoProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
@@ -357,7 +352,7 @@ function mapKeskoProduct(storeId: string, product: Record<string, unknown>): Sto
   }
 
   const productId = readStringField(product, 'id', 'productId', 'ean') ?? name;
-  const price = readPriceValue(product.price) ?? readNumberField(product, 'price', 'salePrice', 'currentPrice');
+  const price = readProductPrice(product);
   if (price === null) {
     throw new Error(`Kesko product ${productId} is missing price`);
   }
@@ -373,7 +368,7 @@ function mapKeskoProduct(storeId: string, product: Record<string, unknown>): Sto
     size,
     unit,
     price,
-    comparisonPrice: readComparisonPrice(product.comparisonPrice),
+    comparisonPrice: readMonetaryValue(product.comparisonPrice),
     rawPayload: product,
   };
 }
@@ -385,7 +380,7 @@ function mapSGroupProduct(storeId: string, product: Record<string, unknown>): St
   }
 
   const productId = readStringField(product, 'id', 'productId', 'ean', 'sku') ?? name;
-  const price = readPriceValue(product.price) ?? readNumberField(product, 'price', 'salePrice', 'currentPrice');
+  const price = readProductPrice(product);
   if (price === null) {
     throw new Error(`S-group product ${productId} is missing price`);
   }
@@ -404,7 +399,7 @@ function mapSGroupProduct(storeId: string, product: Record<string, unknown>): St
     size: inferred.size,
     unit: inferred.unit,
     price,
-    comparisonPrice: readComparisonPrice(product.comparisonPrice),
+    comparisonPrice: readMonetaryValue(product.comparisonPrice),
     rawPayload: product,
   };
 }

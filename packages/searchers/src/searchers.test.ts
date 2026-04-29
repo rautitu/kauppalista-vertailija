@@ -112,6 +112,42 @@ describe('product searchers', () => {
     ]);
   });
 
+  test('prefers salePrice over currentPrice and price when present', () => {
+    const [candidate] = mapKeskoSearchResponse('k-1', {
+      products: [
+        {
+          id: 'promo-1',
+          name: 'Tarjoustuote 1 kpl',
+          price: 5.99,
+          currentPrice: 4.99,
+          salePrice: {
+            value: 3.99,
+          },
+        },
+      ],
+    });
+
+    expect(candidate?.price).toBe(3.99);
+  });
+
+  test('falls back from malformed price object to salePrice/currentPrice', () => {
+    const [candidate] = mapKeskoSearchResponse('k-1', {
+      products: [
+        {
+          id: 'promo-2',
+          name: 'Erikoinen hinta 1 kpl',
+          price: {
+            currency: 'EUR',
+          },
+          salePrice: '2.49',
+          currentPrice: 2.99,
+        },
+      ],
+    });
+
+    expect(candidate?.price).toBe(2.49);
+  });
+
   test('keeps raw payload debuggable when mapping directly', () => {
     const keskoCandidates = mapKeskoSearchResponse('k-1', keskoFixture);
     const sGroupCandidates = mapSGroupSearchResponse('s-1', sGroupFixture);
