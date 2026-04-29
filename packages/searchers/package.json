@@ -8,7 +8,8 @@
   "scripts": {
     "build": "bunx tsc --noEmit -p tsconfig.json",
     "check": "bunx tsc --noEmit -p tsconfig.json",
-    "test": "bun test"
+    "test": "bun test",
+    "test:actual:valio-kevyt-maito": "RUN_ACTUAL_SEARCHER_TESTS=true bun test ./src/searchers.test.actual.valio.kevyt.maito.ts"
   },
   "dependencies": {
     "@kauppalista/domain": "workspace:*"
