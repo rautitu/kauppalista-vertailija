@@ -11,6 +11,14 @@ const ACTUAL_TEST_TIMEOUT_MS = Number(process.env.ACTUAL_SEARCHER_TEST_TIMEOUT_M
 const KESKO_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.KESKO_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 60_000);
 const S_GROUP_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.S_GROUP_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? ACTUAL_TEST_TIMEOUT_MS);
 const QUERY = 'Valio kevyt maito';
+const KESKO_STORE = {
+  id: 'k-citymarket-lielahti',
+  name: 'K-Citymarket Lielahti',
+};
+const S_GROUP_STORE = {
+  id: 'prisma-koivistonkylä',
+  name: 'Prisma Koivistonkylä',
+};
 
 function normalize(value: string | null | undefined) {
   return value
@@ -34,7 +42,20 @@ function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
 }
 
-function printCandidateSummary(sourceLabel: string, candidates: StoreProductCandidate[]) {
+function printSearchStart(
+  sourceLabel: string,
+  store: { id: string; name: string },
+  timeoutMs: number,
+) {
+  console.log(`\n[${sourceLabel}] Aloitetaan haku kaupasta ${store.name} (ID ${store.id})`);
+  console.log(`[${sourceLabel}] Query: "${QUERY}", timeout ${timeoutMs} ms`);
+}
+
+function printCandidateSummary(
+  sourceLabel: string,
+  store: { id: string; name: string },
+  candidates: StoreProductCandidate[],
+) {
   const summary = candidates.slice(0, 5).map((candidate, index) => ({
     '#': index + 1,
     tuote: candidate.name,
@@ -43,7 +64,8 @@ function printCandidateSummary(sourceLabel: string, candidates: StoreProductCand
     vertailuhinta: formatMoney(candidate.comparisonPrice),
   }));
 
-  console.log(`\n[${sourceLabel}] Hakutulokset querylle: "${QUERY}"`);
+  console.log(`\n[${sourceLabel}] Tulokset haettiin kaupasta ${store.name} (ID ${store.id})`);
+  console.log(`[${sourceLabel}] Hakutulokset querylle: "${QUERY}"`);
   console.table(summary);
 }
 
@@ -52,14 +74,17 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
   liveTest('finds Valio kevyt maito from K-Ruoka live API', async () => {
     const searcher = new KeskoSearcher();
+
+    printSearchStart('K-Ruoka', KESKO_STORE, KESKO_ACTUAL_TEST_TIMEOUT_MS);
+
     const result = await searcher.searchProducts({
-      storeId: 'k-citymarket-lielahti',
+      storeId: KESKO_STORE.id,
       query: QUERY,
       limit: 20,
       signal: AbortSignal.timeout(KESKO_ACTUAL_TEST_TIMEOUT_MS),
     });
 
-    printCandidateSummary('K-Ruoka', result.candidates);
+    printCandidateSummary('K-Ruoka', KESKO_STORE, result.candidates);
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
@@ -67,14 +92,17 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
   liveTest('finds Valio kevyt maito from S-kaupat live API', async () => {
     const searcher = new SGroupSearcher();
+
+    printSearchStart('S-kaupat', S_GROUP_STORE, S_GROUP_ACTUAL_TEST_TIMEOUT_MS);
+
     const result = await searcher.searchProducts({
-      storeId: 'prisma-koivistonkylä',
+      storeId: S_GROUP_STORE.id,
       query: QUERY,
       limit: 20,
       signal: AbortSignal.timeout(S_GROUP_ACTUAL_TEST_TIMEOUT_MS),
     });
 
-    printCandidateSummary('S-kaupat', result.candidates);
+    printCandidateSummary('S-kaupat', S_GROUP_STORE, result.candidates);
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
