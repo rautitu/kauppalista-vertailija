@@ -9,7 +9,7 @@
     "build": "bunx tsc --noEmit -p tsconfig.json",
     "check": "bunx tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "test:actual:valio-kevyt-maito": "RUN_ACTUAL_SEARCHER_TESTS=true bun test ./src/searchers.test.actual.valio.kevyt.maito.ts"
+    "test:actual:valio-kevyt-maito": "RUN_ACTUAL_SEARCHER_TESTS=true KESKO_ACTUAL_SEARCHER_TEST_TIMEOUT_MS=60000 bun test ./src/searchers.test.actual.valio.kevyt.maito.ts"
   },
   "dependencies": {
     "@kauppalista/domain": "workspace:*",
