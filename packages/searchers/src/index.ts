@@ -665,7 +665,7 @@ async function searchKeskoProductsWithBrowser(
       async function readResponse(result: Response) {
         return {
           status: result.status,
-          headers: Object.fromEntries(result.headers.entries()),
+          headers: Object.fromEntries(Array.from(result.headers)),
           text: await result.text(),
         };
       }
