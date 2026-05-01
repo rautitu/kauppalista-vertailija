@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { StoreProductCandidate } from '@kauppalista/domain';
 
 // Live network tests are opt-in because external store APIs are flaky and rely
 // on network/browser behavior that may vary by environment.
@@ -27,6 +28,23 @@ function looksLikeRequestedValioKevytMaito(candidate: {
   return brand.includes('valio') && name.includes('kevyt') && name.includes('maito');
 }
 
+function formatMoney(value: number | null | undefined) {
+  return value == null ? '-' : `${value.toFixed(2)} €`;
+}
+
+function printCandidateSummary(sourceLabel: string, candidates: StoreProductCandidate[]) {
+  const summary = candidates.slice(0, 5).map((candidate, index) => ({
+    '#': index + 1,
+    tuote: candidate.name,
+    valmistaja: candidate.brand ?? '-',
+    hinta: formatMoney(candidate.price),
+    vertailuhinta: formatMoney(candidate.comparisonPrice),
+  }));
+
+  console.log(`\n[${sourceLabel}] Hakutulokset querylle: "${QUERY}"`);
+  console.table(summary);
+}
+
 describe('product searchers actual APIs: Valio kevyt maito', () => {
   const liveTest = RUN_ACTUAL_SEARCHER_TESTS ? test : test.skip;
 
@@ -38,6 +56,8 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
       limit: 20,
       signal: AbortSignal.timeout(ACTUAL_TEST_TIMEOUT_MS),
     });
+
+    printCandidateSummary('K-Ruoka', result.candidates);
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
@@ -51,6 +71,8 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
       limit: 20,
       signal: AbortSignal.timeout(ACTUAL_TEST_TIMEOUT_MS),
     });
+
+    printCandidateSummary('S-kaupat', result.candidates);
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
