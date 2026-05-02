@@ -16,6 +16,7 @@
     "db:seed:test": "bun run --filter @kauppalista/db db:seed:test",
     "sync:stores": "bun run --filter @kauppalista/worker sync:stores",
     "test:domain": "bun run --filter @kauppalista/domain test",
-    "test:db": "bun run --filter @kauppalista/db test"
+    "test:db": "bun run --filter @kauppalista/db test",
+    "test:searchers": "bun run --filter @kauppalista/searchers test"
   }
 }

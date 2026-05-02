@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "id": "101010",
+      "name": "Kotimaista Banaani",
+      "brand": "Kotimaista",
+      "price": {
+        "value": 1.89,
+        "currency": "EUR"
+      },
+      "comparisonPrice": {
+        "value": 1.89,
+        "unit": "kg"
+      },
+      "measurement": {
+        "value": 1,
+        "unit": "kg"
+      },
+      "sku": "BAN-1KG"
+    },
+    {
+      "id": "101011",
+      "name": "Chiquita Banaani 900 g",
+      "brandName": "Chiquita",
+      "price": 2.29,
+      "comparisonPrice": 2.54,
+      "measurement": {
+        "value": 900,
+        "unit": "g"
+      }
+    }
+  ]
+}
