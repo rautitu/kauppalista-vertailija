@@ -1,3 +1,1 @@
-export const matcherScaffold = {
-  ready: true,
-};
+export * from './normalizer';
