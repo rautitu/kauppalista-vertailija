@@ -1,3 +1,5 @@
+export * from './actual.valio.kevyt.maito';
+
 import type { Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
 import { chromium } from 'playwright-core';
 import keskoFallbackStores from './fixtures/kesko-stores.json';

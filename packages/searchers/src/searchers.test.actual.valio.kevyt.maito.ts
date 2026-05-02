@@ -4,39 +4,18 @@ import type { StoreProductCandidate } from '@kauppalista/domain';
 // Live network tests are opt-in because external store APIs are flaky and rely
 // on network/browser behavior that may vary by environment.
 
+import {
+  ACTUAL_VALIO_KEVYT_MAITO_KESKO_STORE as KESKO_STORE,
+  ACTUAL_VALIO_KEVYT_MAITO_QUERY as QUERY,
+  ACTUAL_VALIO_KEVYT_MAITO_S_GROUP_STORE as S_GROUP_STORE,
+  looksLikeRequestedValioKevytMaito,
+} from './actual.valio.kevyt.maito';
 import { KeskoSearcher, SGroupSearcher } from './index';
 
 const RUN_ACTUAL_SEARCHER_TESTS = process.env.RUN_ACTUAL_SEARCHER_TESTS === 'true';
 const ACTUAL_TEST_TIMEOUT_MS = Number(process.env.ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 30_000);
 const KESKO_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.KESKO_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 60_000);
-const S_GROUP_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.S_GROUP_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? ACTUAL_TEST_TIMEOUT_MS);
-const QUERY = 'Valio kevyt maito';
-const KESKO_STORE = {
-  id: 'k-citymarket-lielahti',
-  name: 'K-Citymarket Lielahti',
-};
-const S_GROUP_STORE = {
-  id: 'prisma-koivistonkylä',
-  name: 'Prisma Koivistonkylä',
-};
-
-function normalize(value: string | null | undefined) {
-  return value
-    ?.toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim() ?? '';
-}
-
-function looksLikeRequestedValioKevytMaito(candidate: {
-  name: string;
-  brand?: string | null;
-}) {
-  const name = normalize(candidate.name);
-  const brand = normalize(candidate.brand);
-
-  return brand.includes('valio') && name.includes('kevyt') && name.includes('maito');
-}
+const S_GROUP_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.S_GROUP_ACTUAL_TEST_TIMEOUT_MS ?? ACTUAL_TEST_TIMEOUT_MS);
 
 function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
