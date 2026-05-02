@@ -20,6 +20,15 @@ function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
 }
 
+function printSearchStart(
+  sourceLabel: string,
+  store: { id: string; name: string },
+  timeoutMs: number,
+) {
+  console.log(`\n[${sourceLabel}] Aloitetaan matcher-live-haku kaupasta ${store.name} (ID ${store.id})`);
+  console.log(`[${sourceLabel}] Query: "${QUERY}", timeout ${timeoutMs} ms`);
+}
+
 function printCandidateSummary(sourceLabel: string, candidates: StoreProductCandidate[]) {
   const summary = candidates.slice(0, 5).map((candidate, index) => {
     const normalized = normalizeStoreProductCandidate(candidate);
@@ -67,20 +76,23 @@ describe('matcher actual APIs: Valio kevyt maito', () => {
     const keskoSearcher = new KeskoSearcher();
     const sGroupSearcher = new SGroupSearcher();
 
-    const [keskoResult, sGroupResult] = await Promise.all([
-      keskoSearcher.searchProducts({
-        storeId: KESKO_STORE.id,
-        query: QUERY,
-        limit: 20,
-        signal: AbortSignal.timeout(KESKO_ACTUAL_TEST_TIMEOUT_MS),
-      }),
-      sGroupSearcher.searchProducts({
-        storeId: S_GROUP_STORE.id,
-        query: QUERY,
-        limit: 20,
-        signal: AbortSignal.timeout(S_GROUP_ACTUAL_TEST_TIMEOUT_MS),
-      }),
-    ]);
+    printSearchStart('K-Ruoka', KESKO_STORE, KESKO_ACTUAL_TEST_TIMEOUT_MS);
+    const keskoPromise = keskoSearcher.searchProducts({
+      storeId: KESKO_STORE.id,
+      query: QUERY,
+      limit: 20,
+      signal: AbortSignal.timeout(KESKO_ACTUAL_TEST_TIMEOUT_MS),
+    });
+
+    printSearchStart('S-kaupat', S_GROUP_STORE, S_GROUP_ACTUAL_TEST_TIMEOUT_MS);
+    const sGroupPromise = sGroupSearcher.searchProducts({
+      storeId: S_GROUP_STORE.id,
+      query: QUERY,
+      limit: 20,
+      signal: AbortSignal.timeout(S_GROUP_ACTUAL_TEST_TIMEOUT_MS),
+    });
+
+    const [keskoResult, sGroupResult] = await Promise.all([keskoPromise, sGroupPromise]);
 
     printCandidateSummary('K-Ruoka', keskoResult.candidates);
     printCandidateSummary('S-kaupat', sGroupResult.candidates);
