@@ -38,6 +38,8 @@ describe('domain schemas', () => {
       source: 'k-ruoka',
       storeId: 'k-123',
       productId: 'prod-1',
+      key: 'banana|banaani',
+      ean: null,
       name: 'Banaani',
       price: -1,
       rawPayload: {},

@@ -1,3 +1,5 @@
+export * from './actual.valio.kevyt.maito';
+
 import type { Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
 import { chromium } from 'playwright-core';
 import keskoFallbackStores from './fixtures/kesko-stores.json';
@@ -76,6 +78,7 @@ const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $que
       total
       items {
         id
+        ean
         name
         price
         comparisonPrice
@@ -436,6 +439,12 @@ function readKeskoComparisonPrice(product: Record<string, unknown>) {
   return readNumberField(normalUnitPrice ?? {}, 'value', 'price') ?? readMonetaryValue(product.comparisonPrice);
 }
 
+function createProductFallbackKey(name: string, brand?: string | null) {
+  const normalizedName = normalizeSearchValue(name) || name.trim().toLowerCase();
+  const normalizedBrand = normalizeSearchValue(brand) || 'unknown';
+  return `${normalizedBrand}|${normalizedName}`;
+}
+
 function mapKeskoProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
   const sourceProduct = readObject(product.product) ?? product;
   const name =
@@ -447,7 +456,12 @@ function mapKeskoProduct(storeId: string, product: Record<string, unknown>): Sto
     throw new Error('Kesko product is missing name');
   }
 
-  const productId = readStringField(sourceProduct, 'id', 'productId', 'ean') ?? readStringField(product, 'id') ?? name;
+  const brand =
+    readStringField(sourceProduct, 'brand', 'brandName', 'manufacturer') ??
+    readStringField(readObject(sourceProduct.brand) ?? {}, 'name') ??
+    readStringField(product, 'brand', 'brandName');
+  const ean = readStringField(sourceProduct, 'ean', 'baseEan') ?? readStringField(product, 'ean');
+  const productId = readStringField(sourceProduct, 'id', 'productId', 'ean') ?? readStringField(product, 'id') ?? ean ?? name;
   const price = readProductPrice(sourceProduct);
   if (price === null) {
     throw new Error(`Kesko product ${productId} is missing price`);
@@ -465,11 +479,10 @@ function mapKeskoProduct(storeId: string, product: Record<string, unknown>): Sto
     source: 'k-ruoka',
     storeId,
     productId,
+    key: ean ?? createProductFallbackKey(name, brand),
+    ean,
     name,
-    brand:
-      readStringField(sourceProduct, 'brand', 'brandName', 'manufacturer') ??
-      readStringField(readObject(sourceProduct.brand) ?? {}, 'name') ??
-      readStringField(product, 'brand', 'brandName'),
+    brand,
     size,
     unit,
     price,
@@ -484,7 +497,9 @@ function mapSGroupProduct(storeId: string, product: Record<string, unknown>): St
     throw new Error('S-group product is missing name');
   }
 
-  const productId = readStringField(product, 'id', 'productId', 'ean', 'sku') ?? name;
+  const brand = readStringField(product, 'brand', 'brandName', 'manufacturer');
+  const ean = readStringField(product, 'ean');
+  const productId = readStringField(product, 'id', 'productId', 'ean', 'sku') ?? ean ?? name;
   const pricing = readObject(product.pricing);
   const price = readNumberField(pricing ?? {}, 'campaignPrice', 'regularPrice') ?? readProductPrice(product);
   if (price === null) {
@@ -500,8 +515,10 @@ function mapSGroupProduct(storeId: string, product: Record<string, unknown>): St
     source: 's-kaupat',
     storeId,
     productId,
+    key: ean ?? createProductFallbackKey(name, brand),
+    ean,
     name,
-    brand: readStringField(product, 'brand', 'brandName', 'manufacturer'),
+    brand,
     size: inferred.size,
     unit: inferred.unit,
     price,

@@ -4,39 +4,20 @@ import type { StoreProductCandidate } from '@kauppalista/domain';
 // Live network tests are opt-in because external store APIs are flaky and rely
 // on network/browser behavior that may vary by environment.
 
+import {
+  ACTUAL_VALIO_KEVYT_MAITO_KESKO_STORE as KESKO_STORE,
+  ACTUAL_VALIO_KEVYT_MAITO_QUERY as QUERY,
+  ACTUAL_VALIO_KEVYT_MAITO_S_GROUP_STORE as S_GROUP_STORE,
+  looksLikeRequestedValioKevytMaito,
+} from './actual.valio.kevyt.maito';
 import { KeskoSearcher, SGroupSearcher } from './index';
+
+const KESKO_BROWSER_EXECUTABLE_PATH = process.env.KESKO_BROWSER_EXECUTABLE_PATH ?? '/usr/bin/google-chrome';
 
 const RUN_ACTUAL_SEARCHER_TESTS = process.env.RUN_ACTUAL_SEARCHER_TESTS === 'true';
 const ACTUAL_TEST_TIMEOUT_MS = Number(process.env.ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 30_000);
 const KESKO_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.KESKO_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 60_000);
-const S_GROUP_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.S_GROUP_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? ACTUAL_TEST_TIMEOUT_MS);
-const QUERY = 'Valio kevyt maito';
-const KESKO_STORE = {
-  id: 'k-citymarket-lielahti',
-  name: 'K-Citymarket Lielahti',
-};
-const S_GROUP_STORE = {
-  id: 'prisma-koivistonkylä',
-  name: 'Prisma Koivistonkylä',
-};
-
-function normalize(value: string | null | undefined) {
-  return value
-    ?.toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim() ?? '';
-}
-
-function looksLikeRequestedValioKevytMaito(candidate: {
-  name: string;
-  brand?: string | null;
-}) {
-  const name = normalize(candidate.name);
-  const brand = normalize(candidate.brand);
-
-  return brand.includes('valio') && name.includes('kevyt') && name.includes('maito');
-}
+const S_GROUP_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.S_GROUP_ACTUAL_TEST_TIMEOUT_MS ?? ACTUAL_TEST_TIMEOUT_MS);
 
 function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
@@ -60,6 +41,8 @@ function printCandidateSummary(
     '#': index + 1,
     tuote: candidate.name,
     valmistaja: candidate.brand ?? '-',
+    ean: candidate.ean ?? '-',
+    key: candidate.key,
     hinta: formatMoney(candidate.price),
     vertailuhinta: formatMoney(candidate.comparisonPrice),
   }));
@@ -73,7 +56,7 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
   const liveTest = RUN_ACTUAL_SEARCHER_TESTS ? test : test.skip;
 
   liveTest('finds Valio kevyt maito from K-Ruoka live API', async () => {
-    const searcher = new KeskoSearcher();
+    const searcher = new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH });
 
     printSearchStart('K-Ruoka', KESKO_STORE, KESKO_ACTUAL_TEST_TIMEOUT_MS);
 
@@ -88,6 +71,7 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.ean === candidate.key)).toBe(true);
   }, KESKO_ACTUAL_TEST_TIMEOUT_MS + 5_000);
 
   liveTest('finds Valio kevyt maito from S-kaupat live API', async () => {
@@ -106,5 +90,6 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.ean === candidate.key)).toBe(true);
   }, S_GROUP_ACTUAL_TEST_TIMEOUT_MS + 5_000);
 });

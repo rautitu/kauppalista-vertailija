@@ -41,6 +41,8 @@ describe('product searchers', () => {
         source: 'k-ruoka',
         storeId: 'k-citymarket-lielahti',
         productId: '2000524300000',
+        key: '6408430000000',
+        ean: '6408430000000',
         name: 'Valio Kevytmaito 1 l',
         brand: 'Valio',
         size: 1,
@@ -53,6 +55,8 @@ describe('product searchers', () => {
         source: 'k-ruoka',
         storeId: 'k-citymarket-lielahti',
         productId: '2000524300001',
+        key: 'valio|valio kevytmaito laktoositon 1 l',
+        ean: null,
         name: 'Valio Kevytmaito laktoositon 1 l',
         brand: 'Valio',
         size: 1,
@@ -104,6 +108,8 @@ describe('product searchers', () => {
       source: 'k-ruoka',
       storeId: 'k-citymarket-lielahti',
       productId: '6408430000142',
+      key: '6408430000142',
+      ean: '6408430000142',
       name: 'Valio Luomu kevytmaito 1l',
       brand: 'Valio',
       size: 1,
@@ -179,12 +185,15 @@ describe('product searchers', () => {
         from: 0,
       },
     });
+    expect(String(seenRequests[0]?.init?.body)).toContain('ean');
     expect(result.source).toBe('s-kaupat');
     expect(result.candidates).toEqual([
       {
         source: 's-kaupat',
         storeId: '516079340',
         productId: '101010',
+        key: '2000000000010',
+        ean: '2000000000010',
         name: 'Kotimaista Banaani',
         brand: 'Kotimaista',
         size: 1,
@@ -197,6 +206,8 @@ describe('product searchers', () => {
         source: 's-kaupat',
         storeId: '516079340',
         productId: '101011',
+        key: '2000000000011',
+        ean: '2000000000011',
         name: 'Chiquita Banaani 900 g',
         brand: 'Chiquita',
         size: 900,

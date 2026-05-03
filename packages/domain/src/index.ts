@@ -49,6 +49,8 @@ export const StoreProductCandidateSchema = z.object({
   source: StoreSourceSchema,
   storeId: NonEmptyStringSchema,
   productId: NonEmptyStringSchema,
+  key: NonEmptyStringSchema,
+  ean: OptionalTextSchema,
   name: NonEmptyStringSchema,
   brand: OptionalTextSchema,
   size: OptionalPositiveNumberSchema,
