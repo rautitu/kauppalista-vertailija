@@ -2,7 +2,14 @@ import { describe, expect, test } from 'bun:test';
 
 import keskoFixture from './fixtures/kesko-search-response.json';
 import sGroupFixture from './fixtures/s-group-search-response.json';
-import { KeskoSearcher, SGroupSearcher, mapKeskoSearchResponse, mapSGroupSearchResponse } from './index';
+import {
+  KeskoSearcher,
+  SGroupSearcher,
+  mapKeskoSearchResponse,
+  mapSGroupSearchResponse,
+  pickTopCandidate,
+  scoreCandidateAgainstQuery,
+} from './index';
 
 function createJsonResponse(payload: unknown) {
   return new Response(JSON.stringify(payload), {
@@ -36,8 +43,9 @@ describe('product searchers', () => {
     expect(seenUrls[0]).toContain('limit=5');
     expect(result.source).toBe('k-ruoka');
     expect(result.rawResponse).toEqual(keskoFixture);
-    expect(result.candidates).toEqual([
-      {
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0]).toEqual(
+      expect.objectContaining({
         source: 'k-ruoka',
         storeId: 'k-citymarket-lielahti',
         productId: '2000524300000',
@@ -49,9 +57,18 @@ describe('product searchers', () => {
         unit: 'l',
         price: 1.19,
         comparisonPrice: 1.19,
+        searchScore: 40,
         rawPayload: keskoFixture.products[0],
-      },
-      {
+      }),
+    );
+    expect(result.candidates[0]?.searchScoreBreakdown).toEqual(
+      expect.objectContaining({
+        normalizedQuery: 'kevytmaito',
+        matchedTokens: ['kevytmaito'],
+      }),
+    );
+    expect(result.candidates[1]).toEqual(
+      expect.objectContaining({
         source: 'k-ruoka',
         storeId: 'k-citymarket-lielahti',
         productId: '2000524300001',
@@ -63,9 +80,10 @@ describe('product searchers', () => {
         unit: 'l',
         price: 1.35,
         comparisonPrice: 1.35,
+        searchScore: 40,
         rawPayload: keskoFixture.products[1],
-      },
-    ]);
+      }),
+    );
   });
 
   test('maps real Kesko v2 responses into store product candidates', () => {
@@ -116,6 +134,7 @@ describe('product searchers', () => {
       unit: 'l',
       price: 1.44,
       comparisonPrice: 1.44,
+      searchScore: 0,
       rawPayload: {
         id: '6408430000142',
         product: {
@@ -187,8 +206,9 @@ describe('product searchers', () => {
     });
     expect(String(seenRequests[0]?.init?.body)).toContain('ean');
     expect(result.source).toBe('s-kaupat');
-    expect(result.candidates).toEqual([
-      {
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0]).toEqual(
+      expect.objectContaining({
         source: 's-kaupat',
         storeId: '516079340',
         productId: '101010',
@@ -200,9 +220,12 @@ describe('product searchers', () => {
         unit: 'kg',
         price: 1.89,
         comparisonPrice: 1.89,
+        searchScore: 40,
         rawPayload: sGroupFixture.results[0],
-      },
-      {
+      }),
+    );
+    expect(result.candidates[1]).toEqual(
+      expect.objectContaining({
         source: 's-kaupat',
         storeId: '516079340',
         productId: '101011',
@@ -214,9 +237,10 @@ describe('product searchers', () => {
         unit: 'g',
         price: 2.29,
         comparisonPrice: 2.54,
+        searchScore: 40,
         rawPayload: sGroupFixture.results[1],
-      },
-    ]);
+      }),
+    );
   });
 
   test('prefers salePrice over currentPrice and price when present', () => {
@@ -261,5 +285,36 @@ describe('product searchers', () => {
 
     expect(keskoCandidates[0]?.rawPayload).toBe(keskoFixture.products[0]);
     expect(sGroupCandidates[0]?.rawPayload).toBe(sGroupFixture.results[0]);
+  });
+
+  test('scores candidates against a free-form query string', () => {
+    const scored = scoreCandidateAgainstQuery('Valio kevytmaito 1 l', {
+      name: 'Valio kevytmaito 1 l',
+      brand: 'Valio',
+      size: 1,
+      unit: 'l',
+    });
+
+    expect(scored.searchScore).toBeGreaterThan(80);
+    expect(scored.breakdown).toEqual(
+      expect.objectContaining({
+        brandMatched: true,
+        sizeMatched: true,
+        exactNameMatch: true,
+      }),
+    );
+  });
+
+  test('picks one top candidate by highest search score', () => {
+    const selected = pickTopCandidate(
+      [
+        { searchScore: 10, productId: 'a' },
+        { searchScore: 80, productId: 'b' },
+        { searchScore: 60, productId: 'c' },
+      ],
+      () => 0,
+    );
+
+    expect(selected?.productId).toBe('b');
   });
 });

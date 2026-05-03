@@ -1,6 +1,6 @@
 export * from './actual.valio.kevyt.maito';
 
-import type { Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
+import type { SearchScoreBreakdown, Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
 import { chromium } from 'playwright-core';
 import keskoFallbackStores from './fixtures/kesko-stores.json';
 
@@ -153,6 +153,129 @@ function dedupeStores(stores: StoreDirectoryRecord[]) {
 
     return left.storeName.localeCompare(right.storeName, 'fi');
   });
+}
+
+type ParsedQuerySize = {
+  quantity: number;
+  unit: string;
+};
+
+function parseSizeFromQuery(query: string | null | undefined): ParsedQuerySize | null {
+  const normalized = normalizeSearchValue(query);
+  const match = normalized.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|l|dl|cl|ml|kpl)(?=\s|$)/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    quantity: Number(match[1]!.replace(',', '.')),
+    unit: match[2]!.toLowerCase(),
+  };
+}
+
+function normalizeSizeForScore(quantity: number, unit: string) {
+  switch (unit) {
+    case 'kg':
+      return { quantity: quantity * 1000, unit: 'g' };
+    case 'g':
+      return { quantity, unit: 'g' };
+    case 'l':
+      return { quantity: quantity * 1000, unit: 'ml' };
+    case 'dl':
+      return { quantity: quantity * 100, unit: 'ml' };
+    case 'cl':
+      return { quantity: quantity * 10, unit: 'ml' };
+    case 'ml':
+      return { quantity, unit: 'ml' };
+    default:
+      return { quantity, unit };
+  }
+}
+
+function tokenMatches(left: string, right: string) {
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+export function scoreCandidateAgainstQuery(
+  query: string,
+  candidate: Pick<StoreProductCandidate, 'name' | 'brand' | 'size' | 'unit'>,
+): { searchScore: number; breakdown: SearchScoreBreakdown } {
+  const normalizedQuery = normalizeSearchValue(query);
+  const queryTokens = Array.from(new Set(tokenizeSearchValue(query)));
+  const candidateName = normalizeSearchValue(candidate.name);
+  const candidateBrand = normalizeSearchValue(candidate.brand);
+  const candidateTokens = Array.from(new Set(tokenizeSearchValue(`${candidate.brand ?? ''} ${candidate.name}`)));
+  const brandTokens = Array.from(new Set(tokenizeSearchValue(candidate.brand)));
+  const matchedTokens = queryTokens.filter((token) => candidateTokens.some((candidateToken) => tokenMatches(token, candidateToken)));
+  const missingTokens = queryTokens.filter((token) => !candidateTokens.some((candidateToken) => tokenMatches(token, candidateToken)));
+  const exactNameMatch =
+    normalizedQuery.length > 0 &&
+    (candidateName === normalizedQuery || candidateName.replace(/\s+/g, '') === normalizedQuery.replace(/\s+/g, ''));
+  const brandMatched =
+    brandTokens.length > 0 && queryTokens.some((queryToken) => brandTokens.some((brandToken) => tokenMatches(queryToken, brandToken)));
+
+  const parsedQuerySize = parseSizeFromQuery(query);
+  const candidateUnit = candidate.unit ? normalizeSearchValue(candidate.unit) : null;
+  const sizeMatched = (() => {
+    if (!parsedQuerySize || candidate.size == null || !candidateUnit) {
+      return false;
+    }
+
+    const normalizedQuerySize = normalizeSizeForScore(parsedQuerySize.quantity, parsedQuerySize.unit);
+    const normalizedCandidateSize = normalizeSizeForScore(candidate.size, candidateUnit);
+
+    return (
+      normalizedQuerySize.unit === normalizedCandidateSize.unit &&
+      normalizedQuerySize.quantity === normalizedCandidateSize.quantity
+    );
+  })();
+
+  let score = 0;
+  if (exactNameMatch) {
+    score += 30;
+  }
+  if (brandMatched) {
+    score += 20;
+  }
+  if (sizeMatched) {
+    score += 20;
+  }
+
+  if (queryTokens.length > 0) {
+    score += Math.round((matchedTokens.length / queryTokens.length) * 40);
+  }
+
+  score -= Math.min(30, missingTokens.length * 8);
+
+  const breakdown: SearchScoreBreakdown = {
+    normalizedQuery,
+    queryTokens,
+    candidateTokens,
+    matchedTokens,
+    missingTokens,
+    brandMatched,
+    sizeMatched,
+    exactNameMatch,
+  };
+
+  return {
+    searchScore: Math.max(0, Math.min(100, score)),
+    breakdown,
+  };
+}
+
+export function pickTopCandidate<TCandidate extends Pick<StoreProductCandidate, 'searchScore'>>(
+  candidates: TCandidate[],
+  randomFn: () => number = Math.random,
+): TCandidate | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const bestScore = Math.max(...candidates.map((candidate) => candidate.searchScore ?? 0));
+  const topCandidates = candidates.filter((candidate) => (candidate.searchScore ?? 0) === bestScore);
+  const selectedIndex = Math.min(topCandidates.length - 1, Math.floor(randomFn() * topCandidates.length));
+  return topCandidates[selectedIndex] ?? topCandidates[0] ?? null;
 }
 
 function createHeaders(userAgent = DEFAULT_USER_AGENT) {
@@ -445,6 +568,26 @@ function createProductFallbackKey(name: string, brand?: string | null) {
   return `${normalizedBrand}|${normalizedName}`;
 }
 
+function applySearchScore(candidate: StoreProductCandidate, query?: string) {
+  if (!query || query.trim().length === 0) {
+    return {
+      ...candidate,
+      searchScore: 0,
+    } satisfies StoreProductCandidate;
+  }
+
+  const { searchScore, breakdown } = scoreCandidateAgainstQuery(query, candidate);
+  return {
+    ...candidate,
+    searchScore,
+    searchScoreBreakdown: breakdown,
+  } satisfies StoreProductCandidate;
+}
+
+function sortCandidatesBySearchScore(candidates: StoreProductCandidate[]) {
+  return [...candidates].sort((left, right) => right.searchScore - left.searchScore);
+}
+
 function mapKeskoProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
   const sourceProduct = readObject(product.product) ?? product;
   const name =
@@ -487,6 +630,7 @@ function mapKeskoProduct(storeId: string, product: Record<string, unknown>): Sto
     unit,
     price,
     comparisonPrice: readKeskoComparisonPrice(sourceProduct),
+    searchScore: 0,
     rawPayload: product,
   };
 }
@@ -523,6 +667,7 @@ function mapSGroupProduct(storeId: string, product: Record<string, unknown>): St
     unit: inferred.unit,
     price,
     comparisonPrice: readMonetaryValue(product.comparisonPrice) ?? readNumberField(pricing ?? {}, 'regularPrice'),
+    searchScore: 0,
     rawPayload: product,
   };
 }
@@ -545,18 +690,18 @@ function ensureArrayResponse(payload: unknown, paths: string[][], source: string
   throw new Error(`${source} search response did not contain a product array`);
 }
 
-export function mapKeskoSearchResponse(storeId: string, payload: unknown): StoreProductCandidate[] {
+export function mapKeskoSearchResponse(storeId: string, payload: unknown, query?: string): StoreProductCandidate[] {
   const items = ensureArrayResponse(payload, [['products'], ['items'], ['results'], ['result'], ['data', 'products']], 'Kesko');
-  return items.map((item) => mapKeskoProduct(storeId, item));
+  return sortCandidatesBySearchScore(items.map((item) => applySearchScore(mapKeskoProduct(storeId, item), query)));
 }
 
-export function mapSGroupSearchResponse(storeId: string, payload: unknown): StoreProductCandidate[] {
+export function mapSGroupSearchResponse(storeId: string, payload: unknown, query?: string): StoreProductCandidate[] {
   const items = ensureArrayResponse(
     payload,
     [['products'], ['items'], ['results'], ['hits'], ['data', 'products'], ['data', 'store', 'products', 'items']],
     'S-group',
   );
-  return items.map((item) => mapSGroupProduct(storeId, item));
+  return sortCandidatesBySearchScore(items.map((item) => applySearchScore(mapSGroupProduct(storeId, item), query)));
 }
 
 function isKeskoStoreCode(storeId: string) {
@@ -784,7 +929,7 @@ export class KeskoSearcher implements ProductSearcher {
         source: this.source,
         storeId: request.storeId,
         query: request.query,
-        candidates: mapKeskoSearchResponse(request.storeId, rawResponse),
+        candidates: mapKeskoSearchResponse(request.storeId, rawResponse, request.query),
         rawResponse,
       };
     }
@@ -807,7 +952,7 @@ export class KeskoSearcher implements ProductSearcher {
       source: this.source,
       storeId: request.storeId,
       query: request.query,
-      candidates: mapKeskoSearchResponse(request.storeId, rawResponse),
+      candidates: mapKeskoSearchResponse(request.storeId, rawResponse, request.query),
       rawResponse,
     };
   }
@@ -850,7 +995,7 @@ export class SGroupSearcher implements ProductSearcher {
       source: this.source,
       storeId: request.storeId,
       query: request.query,
-      candidates: mapSGroupSearchResponse(request.storeId, rawResponse),
+      candidates: mapSGroupSearchResponse(request.storeId, rawResponse, request.query),
       rawResponse,
     };
   }

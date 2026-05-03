@@ -88,7 +88,7 @@ describe('matcher actual APIs: Valio kevyt maito', () => {
     expect(keskoMilkCandidates.length).toBeGreaterThan(0);
     expect(sGroupMilkCandidates.length).toBeGreaterThan(0);
 
-    const match = findBestCandidateMatch(keskoMilkCandidates, sGroupMilkCandidates);
+    const match = findBestCandidateMatch(keskoMilkCandidates, sGroupMilkCandidates, () => 0);
 
     expect(match.status).toBe('matched');
     expect(match.reason).toBe('ean');

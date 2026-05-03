@@ -116,6 +116,7 @@ describe('matcher normalization', () => {
       unit: 'gr',
       price: 1.99,
       comparisonPrice: 2.21,
+      searchScore: 0,
       rawPayload: {},
     };
 
@@ -142,6 +143,7 @@ describe('matcher normalization', () => {
       size: 5,
       unit: 'dl',
       price: 1.05,
+      searchScore: 0,
       rawPayload: {},
     };
 
@@ -156,6 +158,7 @@ describe('matcher normalization', () => {
       size: 5,
       unit: 'dl',
       price: 1.09,
+      searchScore: 0,
       rawPayload: {},
     };
 
@@ -164,7 +167,7 @@ describe('matcher normalization', () => {
     expect(createStoreProductKey(withoutEan)).toBe('legacy-value');
   });
 
-  test('finds best match by ean before falling back to brand + name', () => {
+  test('finds best match by ean after picking top search candidates', () => {
     const leftCandidates: StoreProductCandidate[] = [
       {
         source: 'k-ruoka',
@@ -177,6 +180,7 @@ describe('matcher normalization', () => {
         size: 5,
         unit: 'dl',
         price: 1.05,
+        searchScore: 90,
         rawPayload: {},
       },
       {
@@ -190,6 +194,7 @@ describe('matcher normalization', () => {
         size: 1,
         unit: 'l',
         price: 1.59,
+        searchScore: 70,
         rawPayload: {},
       },
     ];
@@ -206,6 +211,7 @@ describe('matcher normalization', () => {
         size: 1,
         unit: 'l',
         price: 1.55,
+        searchScore: 60,
         rawPayload: {},
       },
       {
@@ -219,11 +225,12 @@ describe('matcher normalization', () => {
         size: 5,
         unit: 'dl',
         price: 1.09,
+        searchScore: 95,
         rawPayload: {},
       },
     ];
 
-    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
 
     expect(match.status).toBe('matched');
     expect(match.reason).toBe('ean');
@@ -245,6 +252,7 @@ describe('matcher normalization', () => {
         size: 1,
         unit: 'l',
         price: 1.59,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
@@ -261,11 +269,12 @@ describe('matcher normalization', () => {
         size: 1,
         unit: 'l',
         price: 1.55,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
 
-    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
 
     expect(match.status).toBe('matched');
     expect(match.reason).toBe('brand_size_tokens');
@@ -273,7 +282,7 @@ describe('matcher normalization', () => {
     expect(match.confidence).toBeGreaterThan(0.9);
   });
 
-  test('returns ambiguous when top candidates are too close', () => {
+  test('returns ambiguous when the top-1 candidates only partially match', () => {
     const leftCandidates: StoreProductCandidate[] = [
       {
         source: 'k-ruoka',
@@ -286,6 +295,7 @@ describe('matcher normalization', () => {
         size: 200,
         unit: 'g',
         price: 1.59,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
@@ -295,35 +305,24 @@ describe('matcher normalization', () => {
         source: 's-kaupat',
         storeId: 's-1',
         productId: 'right-1',
-        key: 'valio|valio jogurtti mansikka 200 g',
+        key: 'valio|valio jogurtti persikka 200 g',
         ean: null,
-        name: 'Valio jogurtti mansikka 200 g',
+        name: 'Valio jogurtti persikka 200 g',
         brand: 'Valio',
         size: 200,
         unit: 'g',
         price: 1.55,
-        rawPayload: {},
-      },
-      {
-        source: 's-kaupat',
-        storeId: 's-1',
-        productId: 'right-2',
-        key: 'valio|valio jogurtti mansikka 180 g',
-        ean: null,
-        name: 'Valio jogurtti mansikka 180 g',
-        brand: 'Valio',
-        size: 180,
-        unit: 'g',
-        price: 1.65,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
 
-    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
 
     expect(match.status).toBe('ambiguous');
-    expect(match.reason).toBe('ambiguous_top_candidates');
-    expect(match.alternatives?.length).toBe(2);
+    expect(match.reason).toBe('search_top_candidates');
+    expect(match.left?.productId).toBe('left-1');
+    expect(match.right?.productId).toBe('right-1');
   });
 
   test('returns not_found when candidates clearly mismatch', () => {
@@ -339,6 +338,7 @@ describe('matcher normalization', () => {
         size: 1,
         unit: 'l',
         price: 1.59,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
@@ -355,15 +355,16 @@ describe('matcher normalization', () => {
         size: 400,
         unit: 'g',
         price: 4.99,
+        searchScore: 100,
         rawPayload: {},
       },
     ];
 
-    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
 
     expect(match.status).toBe('not_found');
-    expect(match.left).toBeNull();
-    expect(match.right).toBeNull();
+    expect(match.left?.productId).toBe('left-1');
+    expect(match.right?.productId).toBe('right-1');
     expect(match.confidence).toBe(0);
   });
 });

@@ -1,4 +1,5 @@
 import type { CanonicalItem, StoreProductCandidate } from '../../domain/src/index';
+import { pickTopCandidate } from '../../searchers/src/index';
 
 export type UnitFamily = 'mass' | 'volume' | 'count';
 export type CanonicalUnit = 'g' | 'kg' | 'ml' | 'cl' | 'dl' | 'l' | 'kpl';
@@ -50,7 +51,7 @@ export type CandidateMatchReason =
   | 'brand_tokens'
   | 'size_tokens'
   | 'tokens_only'
-  | 'ambiguous_top_candidates';
+  | 'search_top_candidates';
 
 export type CandidatePairScoreBreakdown = {
   eanMatched: boolean;
@@ -80,12 +81,6 @@ export type CandidateMatch = {
   reasoning: string[];
   left: StoreProductCandidate | null;
   right: StoreProductCandidate | null;
-  alternatives?: Array<{
-    left: StoreProductCandidate;
-    right: StoreProductCandidate;
-    score: number;
-    reason: CandidateMatchReason;
-  }>;
 };
 
 const STOPWORDS = new Set([
@@ -580,79 +575,67 @@ export function createStoreProductKey(candidate: StoreProductCandidate) {
 export function findBestCandidateMatch(
   leftCandidates: StoreProductCandidate[],
   rightCandidates: StoreProductCandidate[],
+  randomFn?: () => number,
 ): CandidateMatch {
-  if (leftCandidates.length === 0 || rightCandidates.length === 0) {
+  const left = pickTopCandidate(leftCandidates, randomFn);
+  const right = pickTopCandidate(rightCandidates, randomFn);
+
+  if (!left || !right) {
     return {
       status: 'not_found',
       score: 0,
       confidence: 0,
       confidenceLabel: 'low',
       reason: 'tokens_only',
-      reasoning: ['no candidates available'],
+      reasoning: ['no top candidates available'],
       left: null,
       right: null,
     };
   }
 
-  const scoredPairs = leftCandidates.flatMap((left) =>
-    rightCandidates.map((right) => ({ left, right, scored: scoreCandidatePair(left, right) })),
-  );
+  const scored = scoreCandidatePair(left, right);
+  const { confidence, confidenceLabel } = toConfidence(scored.score);
 
-  scoredPairs.sort((a, b) => b.scored.score - a.scored.score);
-
-  const best = scoredPairs[0];
-  if (!best || best.scored.score < 50) {
+  if (scored.score < 50) {
     return {
       status: 'not_found',
-      score: best?.scored.score ?? 0,
+      score: scored.score,
       confidence: 0,
       confidenceLabel: 'low',
-      reason: best?.scored.reason ?? 'tokens_only',
-      reasoning: best ? buildReasoning(best.scored) : ['no viable candidate pairs'],
-      left: null,
-      right: null,
+      reason: scored.reason,
+      reasoning: buildReasoning(scored),
+      left,
+      right,
     };
   }
 
-  const second = scoredPairs[1];
-  const ambiguous =
-    !!second &&
-    (best.scored.score - second.scored.score < 10 ||
-      (best.scored.breakdown.brandMatched === second.scored.breakdown.brandMatched &&
-        best.scored.breakdown.overlapTokens.join('|') === second.scored.breakdown.overlapTokens.join('|') &&
-        best.scored.breakdown.sizeMatched !== second.scored.breakdown.sizeMatched));
-  const { confidence, confidenceLabel } = toConfidence(best.scored.score);
-
-  if (ambiguous) {
+  if (scored.score < 70) {
     return {
       status: 'ambiguous',
-      score: best.scored.score,
+      score: scored.score,
       confidence: Math.min(confidence, 0.6),
       confidenceLabel: 'medium',
-      reason: 'ambiguous_top_candidates',
+      reason: 'search_top_candidates',
       reasoning: [
-        ...buildReasoning(best.scored),
-        `top two candidate pairs were within ${best.scored.score - second.scored.score} points`,
+        'matching only the top-scored search candidate from each store',
+        ...buildReasoning(scored),
       ],
-      left: best.left,
-      right: best.right,
-      alternatives: [best, second].map((entry) => ({
-        left: entry.left,
-        right: entry.right,
-        score: entry.scored.score,
-        reason: entry.scored.reason,
-      })),
+      left,
+      right,
     };
   }
 
   return {
     status: 'matched',
-    score: best.scored.score,
+    score: scored.score,
     confidence,
     confidenceLabel,
-    reason: best.scored.reason,
-    reasoning: buildReasoning(best.scored),
-    left: best.left,
-    right: best.right,
+    reason: scored.reason,
+    reasoning: [
+      'matched using top-1 search candidate from each store',
+      ...buildReasoning(scored),
+    ],
+    left,
+    right,
   };
 }
