@@ -225,9 +225,145 @@ describe('matcher normalization', () => {
 
     const match = findBestCandidateMatch(leftCandidates, rightCandidates);
 
-    expect(match).not.toBeNull();
-    expect(match?.reason).toBe('ean');
-    expect(match?.left.productId).toBe('left-1');
-    expect(match?.right.productId).toBe('right-2');
+    expect(match.status).toBe('matched');
+    expect(match.reason).toBe('ean');
+    expect(match.score).toBe(100);
+    expect(match.left?.productId).toBe('left-1');
+    expect(match.right?.productId).toBe('right-2');
+  });
+
+  test('scores deterministic non-ean match using brand, size, and tokens', () => {
+    const leftCandidates: StoreProductCandidate[] = [
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-1',
+        key: 'valio|valio kevytmaito 1 l',
+        ean: null,
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.59,
+        rawPayload: {},
+      },
+    ];
+
+    const rightCandidates: StoreProductCandidate[] = [
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-1',
+        key: 'valio|valio kevyt maito 1 l',
+        ean: null,
+        name: 'Valio kevyt maito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.55,
+        rawPayload: {},
+      },
+    ];
+
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+
+    expect(match.status).toBe('matched');
+    expect(match.reason).toBe('brand_size_tokens');
+    expect(match.score).toBeGreaterThanOrEqual(80);
+    expect(match.confidence).toBeGreaterThan(0.9);
+  });
+
+  test('returns ambiguous when top candidates are too close', () => {
+    const leftCandidates: StoreProductCandidate[] = [
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-1',
+        key: 'valio|valio jogurtti mansikka 200 g',
+        ean: null,
+        name: 'Valio jogurtti mansikka 200 g',
+        brand: 'Valio',
+        size: 200,
+        unit: 'g',
+        price: 1.59,
+        rawPayload: {},
+      },
+    ];
+
+    const rightCandidates: StoreProductCandidate[] = [
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-1',
+        key: 'valio|valio jogurtti mansikka 200 g',
+        ean: null,
+        name: 'Valio jogurtti mansikka 200 g',
+        brand: 'Valio',
+        size: 200,
+        unit: 'g',
+        price: 1.55,
+        rawPayload: {},
+      },
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-2',
+        key: 'valio|valio jogurtti mansikka 180 g',
+        ean: null,
+        name: 'Valio jogurtti mansikka 180 g',
+        brand: 'Valio',
+        size: 180,
+        unit: 'g',
+        price: 1.65,
+        rawPayload: {},
+      },
+    ];
+
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+
+    expect(match.status).toBe('ambiguous');
+    expect(match.reason).toBe('ambiguous_top_candidates');
+    expect(match.alternatives?.length).toBe(2);
+  });
+
+  test('returns not_found when candidates clearly mismatch', () => {
+    const leftCandidates: StoreProductCandidate[] = [
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-1',
+        key: 'valio|valio kevytmaito 1 l',
+        ean: null,
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.59,
+        rawPayload: {},
+      },
+    ];
+
+    const rightCandidates: StoreProductCandidate[] = [
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-1',
+        key: 'atria|atria nauta jauheliha 400 g',
+        ean: null,
+        name: 'Atria nauta jauheliha 400 g',
+        brand: 'Atria',
+        size: 400,
+        unit: 'g',
+        price: 4.99,
+        rawPayload: {},
+      },
+    ];
+
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+
+    expect(match.status).toBe('not_found');
+    expect(match.left).toBeNull();
+    expect(match.right).toBeNull();
+    expect(match.confidence).toBe(0);
   });
 });

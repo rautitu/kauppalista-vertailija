@@ -90,11 +90,11 @@ describe('matcher actual APIs: Valio kevyt maito', () => {
 
     const match = findBestCandidateMatch(keskoMilkCandidates, sGroupMilkCandidates);
 
-    expect(match).not.toBeNull();
-    expect(match?.reason).toBe('ean');
+    expect(match.status).toBe('matched');
+    expect(match.reason).toBe('ean');
 
-    const normalizedMatch = normalizeStoreProductCandidate(match!.left);
-    expect(match?.left.ean).toBe(match?.right.ean);
+    const normalizedMatch = normalizeStoreProductCandidate(match.left!);
+    expect(match.left?.ean).toBe(match.right?.ean);
     expect(normalizedMatch.brand).toBe('valio');
     expect(normalizedMatch.parsedSize?.standardizedUnit).toBe('ml');
     expect(normalizedMatch.parsedSize?.standardizedTotalQuantity).toBe(1000);
