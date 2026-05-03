@@ -9,7 +9,9 @@ import {
   SGroupSearcher,
 } from '../../searchers/src/index';
 
-import { normalizeStoreProductCandidate } from './index';
+import { findBestCandidateMatch, normalizeStoreProductCandidate } from './index';
+
+const KESKO_BROWSER_EXECUTABLE_PATH = process.env.KESKO_BROWSER_EXECUTABLE_PATH ?? '/usr/bin/google-chrome';
 
 const RUN_ACTUAL_MATCHER_TESTS = process.env.RUN_ACTUAL_MATCHER_TESTS === 'true';
 const ACTUAL_TEST_TIMEOUT_MS = Number(process.env.ACTUAL_MATCHER_TEST_TIMEOUT_MS ?? 30_000);
@@ -40,7 +42,7 @@ function printCandidateSummary(sourceLabel: string, candidates: StoreProductCand
       hinta: formatMoney(candidate.price),
       brandi: normalized.brand ?? '-',
       koko: normalized.parsedSize?.matchedText ?? '-',
-      key: createComparableKey(candidate),
+      key: candidate.key,
     };
   });
 
@@ -52,28 +54,11 @@ function normalizeComparableText(value: string) {
   return value.replace(/\s+/g, '');
 }
 
-function createComparableKey(candidate: StoreProductCandidate) {
-  const normalized = normalizeStoreProductCandidate(candidate);
-  const compactText = normalizeComparableText(normalized.name.comparisonText);
-  const size = normalized.parsedSize?.standardizedTotalQuantity ?? 'unknown';
-  const unit = normalized.parsedSize?.standardizedUnit ?? 'unknown';
-
-  return [normalized.brand ?? 'unknown', compactText || 'unknown', `${size}${unit}`].join('|');
-}
-
-function findComparableMatch(
-  leftCandidates: StoreProductCandidate[],
-  rightCandidates: StoreProductCandidate[],
-) {
-  const rightKeys = new Set(rightCandidates.map(createComparableKey));
-  return leftCandidates.find((candidate) => rightKeys.has(createComparableKey(candidate))) ?? null;
-}
-
 describe('matcher actual APIs: Valio kevyt maito', () => {
   const liveTest = RUN_ACTUAL_MATCHER_TESTS ? test : test.skip;
 
   liveTest('matches normalized milk candidates between K-Ruoka and S-kaupat live APIs', async () => {
-    const keskoSearcher = new KeskoSearcher();
+    const keskoSearcher = new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH });
     const sGroupSearcher = new SGroupSearcher();
 
     printSearchStart('K-Ruoka', KESKO_STORE, KESKO_ACTUAL_TEST_TIMEOUT_MS);
@@ -103,11 +88,13 @@ describe('matcher actual APIs: Valio kevyt maito', () => {
     expect(keskoMilkCandidates.length).toBeGreaterThan(0);
     expect(sGroupMilkCandidates.length).toBeGreaterThan(0);
 
-    const match = findComparableMatch(keskoMilkCandidates, sGroupMilkCandidates);
+    const match = findBestCandidateMatch(keskoMilkCandidates, sGroupMilkCandidates);
 
     expect(match).not.toBeNull();
+    expect(match?.reason).toBe('ean');
 
-    const normalizedMatch = normalizeStoreProductCandidate(match!);
+    const normalizedMatch = normalizeStoreProductCandidate(match!.left);
+    expect(match?.left.ean).toBe(match?.right.ean);
     expect(normalizedMatch.brand).toBe('valio');
     expect(normalizedMatch.parsedSize?.standardizedUnit).toBe('ml');
     expect(normalizedMatch.parsedSize?.standardizedTotalQuantity).toBe(1000);

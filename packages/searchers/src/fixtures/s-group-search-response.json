@@ -4,6 +4,7 @@
       "id": "101010",
       "name": "Kotimaista Banaani",
       "brand": "Kotimaista",
+      "ean": "2000000000010",
       "price": {
         "value": 1.89,
         "currency": "EUR"
@@ -22,6 +23,7 @@
       "id": "101011",
       "name": "Chiquita Banaani 900 g",
       "brandName": "Chiquita",
+      "ean": "2000000000011",
       "price": 2.29,
       "comparisonPrice": 2.54,
       "measurement": {

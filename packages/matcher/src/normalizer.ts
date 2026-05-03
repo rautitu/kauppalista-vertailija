@@ -42,6 +42,14 @@ export type NormalizedStoreProductCandidate = {
   name: NormalizedName;
 };
 
+export type CandidateMatchReason = 'ean' | 'brand_name';
+
+export type CandidateMatch = {
+  left: StoreProductCandidate;
+  right: StoreProductCandidate;
+  reason: CandidateMatchReason;
+};
+
 const STOPWORDS = new Set([
   'x',
   'ja',
@@ -341,4 +349,60 @@ export function normalizeStoreProductCandidate(candidate: StoreProductCandidate)
     parsedSize,
     name: normalizeName(candidate.name, brand, parsedSize),
   };
+}
+
+function compactComparableText(value: string) {
+  return value.replace(/\s+/g, '');
+}
+
+export function createStoreProductFallbackKey(candidate: StoreProductCandidate) {
+  const normalized = normalizeStoreProductCandidate(candidate);
+  const brand = normalized.brand ?? 'unknown';
+  const name = normalizeText(candidate.name) || compactComparableText(normalized.name.comparisonText) || 'unknown';
+
+  return `${brand}|${name}`;
+}
+
+export function createStoreProductKey(candidate: StoreProductCandidate) {
+  return normalizeText(candidate.ean) || normalizeText(candidate.key) || createStoreProductFallbackKey(candidate);
+}
+
+export function findBestCandidateMatch(
+  leftCandidates: StoreProductCandidate[],
+  rightCandidates: StoreProductCandidate[],
+): CandidateMatch | null {
+  const rightByEan = new Map<string, StoreProductCandidate>();
+  const rightByFallbackKey = new Map<string, StoreProductCandidate>();
+
+  for (const candidate of rightCandidates) {
+    const normalizedEan = normalizeText(candidate.ean);
+    if (normalizedEan && !rightByEan.has(normalizedEan)) {
+      rightByEan.set(normalizedEan, candidate);
+    }
+
+    const fallbackKey = createStoreProductFallbackKey(candidate);
+    if (!rightByFallbackKey.has(fallbackKey)) {
+      rightByFallbackKey.set(fallbackKey, candidate);
+    }
+  }
+
+  for (const candidate of leftCandidates) {
+    const normalizedEan = normalizeText(candidate.ean);
+    if (normalizedEan) {
+      const right = rightByEan.get(normalizedEan);
+      if (right) {
+        return { left: candidate, right, reason: 'ean' };
+      }
+    }
+  }
+
+  for (const candidate of leftCandidates) {
+    const fallbackKey = createStoreProductFallbackKey(candidate);
+    const right = rightByFallbackKey.get(fallbackKey);
+    if (right) {
+      return { left: candidate, right, reason: 'brand_name' };
+    }
+  }
+
+  return null;
 }

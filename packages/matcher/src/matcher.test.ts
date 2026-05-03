@@ -3,6 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import type { CanonicalItem, StoreProductCandidate } from '../../domain/src/index';
 import {
   createPackageSizeFromParts,
+  createStoreProductFallbackKey,
+  createStoreProductKey,
+  findBestCandidateMatch,
   normalizeCanonicalItem,
   normalizeName,
   normalizeStoreProductCandidate,
@@ -105,6 +108,8 @@ describe('matcher normalization', () => {
       source: 's-kaupat',
       storeId: '123',
       productId: 'sku-1',
+      key: 'kotimaista|kotimaista banaani 900 g',
+      ean: null,
       name: 'Kotimaista Banaani 900 g',
       brand: 'Kotimaista',
       size: 900,
@@ -123,5 +128,106 @@ describe('matcher normalization', () => {
       standardizedTotalQuantity: 900,
     });
     expect(normalized.name.tokens).toEqual(['banaani']);
+  });
+
+  test('prefers ean as product key and falls back to normalized brand + name', () => {
+    const withEan: StoreProductCandidate = {
+      source: 'k-ruoka',
+      storeId: 'k-1',
+      productId: 'prod-1',
+      key: '6408430000456',
+      ean: '6408430000456',
+      name: 'Valio kevytmaito 5 dl',
+      brand: 'Valio',
+      size: 5,
+      unit: 'dl',
+      price: 1.05,
+      rawPayload: {},
+    };
+
+    const withoutEan: StoreProductCandidate = {
+      source: 's-kaupat',
+      storeId: 's-1',
+      productId: 'prod-2',
+      key: 'legacy-value',
+      ean: null,
+      name: 'Valio kevytmaito 5 dl',
+      brand: 'Valio',
+      size: 5,
+      unit: 'dl',
+      price: 1.09,
+      rawPayload: {},
+    };
+
+    expect(createStoreProductKey(withEan)).toBe('6408430000456');
+    expect(createStoreProductFallbackKey(withoutEan)).toBe('valio|valio kevytmaito 5 dl');
+    expect(createStoreProductKey(withoutEan)).toBe('legacy-value');
+  });
+
+  test('finds best match by ean before falling back to brand + name', () => {
+    const leftCandidates: StoreProductCandidate[] = [
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-1',
+        key: '6408430000456',
+        ean: '6408430000456',
+        name: 'Valio kevytmaito 5 dl',
+        brand: 'Valio',
+        size: 5,
+        unit: 'dl',
+        price: 1.05,
+        rawPayload: {},
+      },
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-2',
+        key: 'valio|valio kevytmaito 1 l',
+        ean: null,
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.59,
+        rawPayload: {},
+      },
+    ];
+
+    const rightCandidates: StoreProductCandidate[] = [
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-1',
+        key: 'valio|valio kevytmaito 1 l',
+        ean: null,
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.55,
+        rawPayload: {},
+      },
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-2',
+        key: '6408430000456',
+        ean: '6408430000456',
+        name: 'Valio kevytmaito 5 dl',
+        brand: 'Valio',
+        size: 5,
+        unit: 'dl',
+        price: 1.09,
+        rawPayload: {},
+      },
+    ];
+
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates);
+
+    expect(match).not.toBeNull();
+    expect(match?.reason).toBe('ean');
+    expect(match?.left.productId).toBe('left-1');
+    expect(match?.right.productId).toBe('right-2');
   });
 });

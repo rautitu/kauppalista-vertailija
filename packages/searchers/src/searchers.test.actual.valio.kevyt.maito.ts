@@ -12,6 +12,8 @@ import {
 } from './actual.valio.kevyt.maito';
 import { KeskoSearcher, SGroupSearcher } from './index';
 
+const KESKO_BROWSER_EXECUTABLE_PATH = process.env.KESKO_BROWSER_EXECUTABLE_PATH ?? '/usr/bin/google-chrome';
+
 const RUN_ACTUAL_SEARCHER_TESTS = process.env.RUN_ACTUAL_SEARCHER_TESTS === 'true';
 const ACTUAL_TEST_TIMEOUT_MS = Number(process.env.ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 30_000);
 const KESKO_ACTUAL_TEST_TIMEOUT_MS = Number(process.env.KESKO_ACTUAL_SEARCHER_TEST_TIMEOUT_MS ?? 60_000);
@@ -39,6 +41,8 @@ function printCandidateSummary(
     '#': index + 1,
     tuote: candidate.name,
     valmistaja: candidate.brand ?? '-',
+    ean: candidate.ean ?? '-',
+    key: candidate.key,
     hinta: formatMoney(candidate.price),
     vertailuhinta: formatMoney(candidate.comparisonPrice),
   }));
@@ -52,7 +56,7 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
   const liveTest = RUN_ACTUAL_SEARCHER_TESTS ? test : test.skip;
 
   liveTest('finds Valio kevyt maito from K-Ruoka live API', async () => {
-    const searcher = new KeskoSearcher();
+    const searcher = new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH });
 
     printSearchStart('K-Ruoka', KESKO_STORE, KESKO_ACTUAL_TEST_TIMEOUT_MS);
 
@@ -67,6 +71,7 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.ean === candidate.key)).toBe(true);
   }, KESKO_ACTUAL_TEST_TIMEOUT_MS + 5_000);
 
   liveTest('finds Valio kevyt maito from S-kaupat live API', async () => {
@@ -85,5 +90,6 @@ describe('product searchers actual APIs: Valio kevyt maito', () => {
 
     expect(result.candidates.length).toBeGreaterThan(0);
     expect(result.candidates.some(looksLikeRequestedValioKevytMaito)).toBe(true);
+    expect(result.candidates.some((candidate) => candidate.ean === candidate.key)).toBe(true);
   }, S_GROUP_ACTUAL_TEST_TIMEOUT_MS + 5_000);
 });
