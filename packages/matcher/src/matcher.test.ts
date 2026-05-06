@@ -13,6 +13,7 @@ import {
   normalizeUnit,
   parsePackageSize,
   tokenizeText,
+  validateCrossStoreMatch,
 } from './index';
 
 describe('matcher normalization', () => {
@@ -237,6 +238,82 @@ describe('matcher normalization', () => {
     expect(match.score).toBe(100);
     expect(match.left?.productId).toBe('left-1');
     expect(match.right?.productId).toBe('right-2');
+  });
+
+  test('cross-store validation rejects right-looking but different products', () => {
+    const left: StoreProductCandidate = {
+      source: 'k-ruoka',
+      storeId: 'k-1',
+      productId: 'left-1',
+      key: 'valio|valio kevytmaito 1 l',
+      ean: null,
+      name: 'Valio kevytmaito 1 l',
+      brand: 'Valio',
+      size: 1,
+      unit: 'l',
+      price: 1.59,
+      searchScore: 100,
+      rawPayload: {},
+    };
+
+    const right: StoreProductCandidate = {
+      source: 's-kaupat',
+      storeId: 's-1',
+      productId: 'right-1',
+      key: 'valio|valio kevytmaito 1 5 l',
+      ean: null,
+      name: 'Valio kevytmaito 1,5 l',
+      brand: 'Valio',
+      size: 1.5,
+      unit: 'l',
+      price: 2.09,
+      searchScore: 100,
+      rawPayload: {},
+    };
+
+    const validation = validateCrossStoreMatch(left, right);
+
+    expect(validation.status).toBe('mismatch');
+    expect(validation.reason).toBe('size_mismatch');
+    expect(validation.details[0]).toContain('package size mismatch');
+  });
+
+  test('cross-store validation accepts non-ean match when brand, size, and core text align', () => {
+    const left: StoreProductCandidate = {
+      source: 'k-ruoka',
+      storeId: 'k-1',
+      productId: 'left-1',
+      key: 'pirkka|pirkka banaani 900 g',
+      ean: null,
+      name: 'Pirkka Banaani 900 g',
+      brand: 'Pirkka',
+      size: 900,
+      unit: 'g',
+      price: 1.99,
+      searchScore: 100,
+      rawPayload: {},
+    };
+
+    const right: StoreProductCandidate = {
+      source: 's-kaupat',
+      storeId: 's-1',
+      productId: 'right-1',
+      key: 'pirkka|pirkka banaani 900 g',
+      ean: null,
+      name: 'Pirkka banaani 900 g',
+      brand: 'Pirkka',
+      size: 900,
+      unit: 'g',
+      price: 2.05,
+      searchScore: 100,
+      rawPayload: {},
+    };
+
+    const validation = validateCrossStoreMatch(left, right);
+
+    expect(validation.status).toBe('matched');
+    expect(validation.details).toContain('brand aligned');
+    expect(validation.details).toContain('package size aligned');
   });
 
   test('scores deterministic non-ean match using brand, size, and tokens', () => {

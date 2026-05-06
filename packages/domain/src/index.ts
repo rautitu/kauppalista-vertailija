@@ -15,7 +15,7 @@ export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 export const StoreSourceSchema = z.enum(['k-ruoka', 's-kaupat']);
 export type StoreSource = z.infer<typeof StoreSourceSchema>;
 
-export const MatchStatusSchema = z.enum(['matched', 'ambiguous', 'not_found']);
+export const MatchStatusSchema = z.enum(['matched', 'ambiguous', 'not_found', 'mismatch']);
 export type MatchStatus = z.infer<typeof MatchStatusSchema>;
 
 const NonEmptyStringSchema = z.string().trim().min(1);
@@ -88,11 +88,20 @@ export const ProductMatchSchema = z.object({
 });
 export type ProductMatch = z.infer<typeof ProductMatchSchema>;
 
+export const CrossStoreValidationResultSchema = z.object({
+  status: z.enum(['matched', 'mismatch']),
+  reason: NonEmptyStringSchema,
+  confidence: z.number().min(0).max(1),
+  details: z.array(NonEmptyStringSchema).default([]),
+});
+export type CrossStoreValidationResult = z.infer<typeof CrossStoreValidationResultSchema>;
+
 export const ComparisonRunItemSchema = z.object({
   canonicalItem: CanonicalItemSchema,
   kMatch: ProductMatchSchema.nullable(),
   sMatch: ProductMatchSchema.nullable(),
   status: MatchStatusSchema,
+  crossStoreValidation: CrossStoreValidationResultSchema.optional(),
 });
 export type ComparisonRunItem = z.infer<typeof ComparisonRunItemSchema>;
 

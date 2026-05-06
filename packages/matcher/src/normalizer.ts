@@ -72,6 +72,17 @@ export type CandidatePairScore = {
 
 export type CandidateMatchStatus = 'matched' | 'ambiguous' | 'not_found';
 
+export type CrossStoreValidationStatus = 'matched' | 'mismatch';
+
+export type CrossStoreValidationResult = {
+  status: CrossStoreValidationStatus;
+  confidence: number;
+  reason: 'ean' | 'brand_mismatch' | 'size_mismatch' | 'token_mismatch' | 'incomplete_data';
+  details: string[];
+  left: StoreProductCandidate;
+  right: StoreProductCandidate;
+};
+
 export type CandidateMatch = {
   status: CandidateMatchStatus;
   score: number;
@@ -570,6 +581,119 @@ export function createStoreProductFallbackKey(candidate: StoreProductCandidate) 
 
 export function createStoreProductKey(candidate: StoreProductCandidate) {
   return normalizeText(candidate.ean) || normalizeText(candidate.key) || createStoreProductFallbackKey(candidate);
+}
+
+export function validateCrossStoreMatch(
+  leftCandidate: StoreProductCandidate,
+  rightCandidate: StoreProductCandidate,
+): CrossStoreValidationResult {
+  const left = normalizeStoreProductCandidate(leftCandidate);
+  const right = normalizeStoreProductCandidate(rightCandidate);
+  const leftEan = normalizeText(leftCandidate.ean);
+  const rightEan = normalizeText(rightCandidate.ean);
+
+  if (leftEan && rightEan && leftEan === rightEan) {
+    return {
+      status: 'matched',
+      confidence: 1,
+      reason: 'ean',
+      details: ['EAN matched exactly'],
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  const details: string[] = [];
+
+  if (left.brand && right.brand && left.brand !== right.brand) {
+    details.push(`brand mismatch: ${left.brand} vs ${right.brand}`);
+    return {
+      status: 'mismatch',
+      confidence: 0.98,
+      reason: 'brand_mismatch',
+      details,
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  if (left.parsedSize && right.parsedSize && hasMismatchingSizeFamily(left.parsedSize, right.parsedSize)) {
+    details.push(
+      `package size mismatch: ${left.parsedSize.standardizedTotalQuantity} ${left.parsedSize.standardizedUnit} vs ${right.parsedSize.standardizedTotalQuantity} ${right.parsedSize.standardizedUnit}`,
+    );
+    return {
+      status: 'mismatch',
+      confidence: 0.96,
+      reason: 'size_mismatch',
+      details,
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  const overlapTokens = intersectTokens(left.name.tokens, right.name.tokens);
+  const leftOnlyTokens = differenceTokens(left.name.tokens, right.name.tokens);
+  const rightOnlyTokens = differenceTokens(right.name.tokens, left.name.tokens);
+  const normalizedLeftText = compactComparableText(left.name.comparisonText);
+  const normalizedRightText = compactComparableText(right.name.comparisonText);
+  const sameCoreText = normalizedLeftText.length > 0 && normalizedLeftText === normalizedRightText;
+
+  if (!sameCoreText && overlapTokens.length === 0) {
+    details.push('no shared core tokens between matched products');
+    return {
+      status: 'mismatch',
+      confidence: 0.9,
+      reason: 'token_mismatch',
+      details,
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  if (!sameCoreText && (leftOnlyTokens.length > 0 || rightOnlyTokens.length > 0)) {
+    details.push(`left-only tokens: ${leftOnlyTokens.join(', ') || '-'}`);
+    details.push(`right-only tokens: ${rightOnlyTokens.join(', ') || '-'}`);
+    return {
+      status: 'mismatch',
+      confidence: 0.75,
+      reason: 'token_mismatch',
+      details,
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  if ((!left.brand || !right.brand) && (!left.parsedSize || !right.parsedSize) && !sameCoreText) {
+    return {
+      status: 'mismatch',
+      confidence: 0.55,
+      reason: 'incomplete_data',
+      details: ['insufficient shared brand/size/text evidence for cross-store validation'],
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
+
+  if (left.brand && right.brand) {
+    details.push('brand aligned');
+  }
+  if (left.parsedSize && right.parsedSize && hasMatchingParsedSize(left.parsedSize, right.parsedSize)) {
+    details.push('package size aligned');
+  }
+  if (sameCoreText) {
+    details.push('core product text aligned');
+  } else if (overlapTokens.length > 0) {
+    details.push(`shared core tokens: ${overlapTokens.join(', ')}`);
+  }
+
+  return {
+    status: 'matched',
+    confidence: left.brand && right.brand && left.parsedSize && right.parsedSize ? 0.92 : 0.78,
+    reason: 'incomplete_data',
+    details,
+    left: leftCandidate,
+    right: rightCandidate,
+  };
 }
 
 export function findBestCandidateMatch(
