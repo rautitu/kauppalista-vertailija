@@ -71,6 +71,8 @@ const DEFAULT_USER_AGENT = 'kauppalista-vertailija/phase-5-product-searchers';
 const DEFAULT_BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 const DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH = '/snap/bin/chromium';
+const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
+const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
 const S_GROUP_PRODUCTS_OPERATION_NAME = 'RemoteFilteredProducts';
 const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $queryString: String, $limit: Int, $from: Int) {
   store(id: $storeId) {
@@ -751,7 +753,19 @@ function findBestKeskoStoreMatch(storeId: string, candidates: KeskoStoreSearchRe
     .sort((left, right) => right.score - left.score)[0]?.candidate;
 }
 
-async function withKeskoBrowserSession<T>(options: KeskoSearcherOptions, callback: (page: Awaited<ReturnType<typeof chromium.launch>> extends infer TBrowser ? TBrowser extends { newPage: () => Promise<infer TPage> } ? TPage : never : never) => Promise<T>) {
+function toAbortError(reason?: unknown) {
+  if (reason instanceof Error) {
+    return reason;
+  }
+
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+async function withKeskoBrowserSession<T>(
+  options: KeskoSearcherOptions,
+  callback: (page: Awaited<ReturnType<typeof chromium.launch>> extends infer TBrowser ? TBrowser extends { newPage: () => Promise<infer TPage> } ? TPage : never : never) => Promise<T>,
+  signal?: AbortSignal,
+) {
   const executablePath =
     options.browserExecutablePath ?? process.env.KESKO_BROWSER_EXECUTABLE_PATH ?? DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH;
   const browser = await chromium.launch({
@@ -760,18 +774,43 @@ async function withKeskoBrowserSession<T>(options: KeskoSearcherOptions, callbac
     args: ['--disable-blink-features=AutomationControlled'],
   });
 
+  let abortHandler: (() => void) | undefined;
+
   try {
+    if (signal?.aborted) {
+      throw toAbortError(signal.reason);
+    }
+
     const page = await browser.newPage({
       userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
     });
     await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => null);
-    return await callback(page as never);
+    const task = callback(page as never);
+
+    if (!signal) {
+      return await task;
+    }
+
+    const abortPromise = new Promise<never>((_, reject) => {
+      abortHandler = () => {
+        void browser.close().catch(() => null);
+        reject(toAbortError(signal.reason));
+      };
+
+      signal.addEventListener('abort', abortHandler, { once: true });
+    });
+
+    return await Promise.race([task, abortPromise]);
   } finally {
-    await browser.close();
+    if (signal && abortHandler) {
+      signal.removeEventListener('abort', abortHandler);
+    }
+
+    await browser.close().catch(() => null);
   }
 }
 
-async function resolveKeskoStoreId(storeId: string, options: KeskoSearcherOptions) {
+async function resolveKeskoStoreId(storeId: string, options: KeskoSearcherOptions, signal?: AbortSignal) {
   if (isKeskoStoreCode(storeId)) {
     return storeId;
   }
@@ -779,21 +818,32 @@ async function resolveKeskoStoreId(storeId: string, options: KeskoSearcherOption
   const query = toKeskoStoreLookupQuery(storeId);
 
   return withKeskoBrowserSession(options, async (page) => {
-    const response = await page.evaluate(async ({ query }) => {
-      const result = await fetch('https://www.k-ruoka.fi/kr-api/stores/search', {
-        method: 'POST',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ query, offset: 0, limit: 20 }),
-      });
+    const response = await page.evaluate(async ({ query, timeoutMs }) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(new Error(`Kesko store lookup timed out after ${timeoutMs} ms`)), timeoutMs);
 
-      return {
-        status: result.status,
-        text: await result.text(),
-      };
-    }, { query });
+      try {
+        const result = await fetch('https://www.k-ruoka.fi/kr-api/stores/search', {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ query, offset: 0, limit: 20 }),
+          signal: controller.signal,
+        });
+
+        return {
+          status: result.status,
+          text: await result.text(),
+        };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }, {
+      query,
+      timeoutMs: Number(process.env.KESKO_STORE_LOOKUP_TIMEOUT_MS ?? DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS),
+    });
 
     if (response.status !== 200) {
       throw new Error(`Kesko store lookup failed with status ${response.status}`);
@@ -808,7 +858,7 @@ async function resolveKeskoStoreId(storeId: string, options: KeskoSearcherOption
     }
 
     return match.id;
-  });
+  }, signal);
 }
 
 async function searchKeskoProductsWithBrowser(
@@ -816,9 +866,10 @@ async function searchKeskoProductsWithBrowser(
   query: string,
   limit: number | undefined,
   options: KeskoSearcherOptions,
+  signal?: AbortSignal,
 ) {
   return withKeskoBrowserSession(options, async (page) => {
-    const response = await page.evaluate(async ({ storeId, query, limit }) => {
+    const response = await page.evaluate(async ({ storeId, query, limit, timeoutMs }) => {
       const productUrl = new URL(`https://www.k-ruoka.fi/kr-api/v2/product-search/${encodeURIComponent(query)}`);
       productUrl.searchParams.set('storeId', storeId);
       productUrl.searchParams.set('offset', '0');
@@ -832,13 +883,27 @@ async function searchKeskoProductsWithBrowser(
         };
       }
 
+      async function fetchWithTimeout(url: string, init: RequestInit) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(new Error(`Kesko product search timed out after ${timeoutMs} ms`)), timeoutMs);
+
+        try {
+          return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
+
       const baseHeaders = {
         accept: 'application/json',
         origin: 'https://www.k-ruoka.fi',
         referer: `https://www.k-ruoka.fi/haku?q=${encodeURIComponent(query)}`,
       };
 
-      const buildProbe = await readResponse(await fetch(productUrl.toString(), { method: 'POST', headers: baseHeaders }));
+      const buildProbe = await readResponse(await fetchWithTimeout(productUrl.toString(), { method: 'POST', headers: baseHeaders }));
       const buildNumber = buildProbe.headers['k-ruoka-build'];
 
       if (!buildNumber && buildProbe.status !== 200) {
@@ -850,7 +915,7 @@ async function searchKeskoProductsWithBrowser(
       }
 
       return readResponse(
-        await fetch(productUrl.toString(), {
+        await fetchWithTimeout(productUrl.toString(), {
           method: 'POST',
           headers: {
             ...baseHeaders,
@@ -858,14 +923,19 @@ async function searchKeskoProductsWithBrowser(
           },
         }),
       );
-    }, { storeId, query, limit });
+    }, {
+      storeId,
+      query,
+      limit,
+      timeoutMs: Number(process.env.KESKO_BROWSER_FETCH_TIMEOUT_MS ?? DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS),
+    });
 
     if (response.status !== 200) {
       throw new Error(`Kesko product search failed with status ${response.status}`);
     }
 
     return JSON.parse(response.text) as unknown;
-  });
+  }, signal);
 }
 
 async function resolveSGroupStoreId(storeId: string, options: SGroupSearcherOptions) {
@@ -917,12 +987,14 @@ export class KeskoSearcher implements ProductSearcher {
 
   async searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult> {
     if (!this.options.fetchImpl && !this.options.searchUrl) {
-      const resolvedStoreId = await resolveKeskoStoreId(request.storeId, this.options);
+      const signal = request.signal ?? this.options.signal;
+      const resolvedStoreId = await resolveKeskoStoreId(request.storeId, this.options, signal);
       const rawResponse = await searchKeskoProductsWithBrowser(
         resolvedStoreId,
         request.query,
         request.limit,
         this.options,
+        signal,
       );
 
       return {
