@@ -10,7 +10,7 @@ import {
   ACTUAL_VALIO_KEVYT_MAITO_S_GROUP_STORE as S_GROUP_STORE,
   looksLikeRequestedValioKevytMaito,
 } from './actual.valio.kevyt.maito';
-import { KeskoSearcher, SGroupSearcher } from './index';
+import { KeskoSearcher, SGroupSearcher, pickTopCandidate } from './index';
 
 const KESKO_BROWSER_EXECUTABLE_PATH = process.env.KESKO_BROWSER_EXECUTABLE_PATH ?? '/usr/bin/google-chrome';
 
@@ -39,6 +39,7 @@ function printCandidateSummary(
 ) {
   const summary = candidates.slice(0, 5).map((candidate, index) => ({
     '#': index + 1,
+    score: candidate.searchScore,
     tuote: candidate.name,
     valmistaja: candidate.brand ?? '-',
     ean: candidate.ean ?? '-',
@@ -46,10 +47,19 @@ function printCandidateSummary(
     hinta: formatMoney(candidate.price),
     vertailuhinta: formatMoney(candidate.comparisonPrice),
   }));
+  const selectedCandidate = pickTopCandidate(candidates, () => 0);
 
   console.log(`\n[${sourceLabel}] Tulokset haettiin kaupasta ${store.name} (ID ${store.id})`);
   console.log(`[${sourceLabel}] Hakutulokset querylle: "${QUERY}"`);
   console.table(summary);
+
+  if (selectedCandidate) {
+    console.log(
+      `[${sourceLabel}] Valittu paras match: ${selectedCandidate.name} (score ${selectedCandidate.searchScore}, key ${selectedCandidate.key})`,
+    );
+  } else {
+    console.log(`[${sourceLabel}] Valittua tuotetta ei löytynyt.`);
+  }
 }
 
 describe('product searchers actual APIs: Valio kevyt maito', () => {
