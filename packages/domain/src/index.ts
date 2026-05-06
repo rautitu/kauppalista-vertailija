@@ -23,6 +23,18 @@ const OptionalTextSchema = z.string().trim().min(1).nullable().optional();
 const OptionalPositiveNumberSchema = z.number().positive().nullable().optional();
 const MoneySchema = z.number().nonnegative();
 
+export const SearchScoreBreakdownSchema = z.object({
+  normalizedQuery: z.string(),
+  queryTokens: z.array(z.string()),
+  candidateTokens: z.array(z.string()),
+  matchedTokens: z.array(z.string()),
+  missingTokens: z.array(z.string()),
+  brandMatched: z.boolean(),
+  sizeMatched: z.boolean(),
+  exactNameMatch: z.boolean(),
+});
+export type SearchScoreBreakdown = z.infer<typeof SearchScoreBreakdownSchema>;
+
 export const CanonicalItemSchema = z.object({
   id: NonEmptyStringSchema,
   name: NonEmptyStringSchema,
@@ -57,6 +69,8 @@ export const StoreProductCandidateSchema = z.object({
   unit: OptionalTextSchema,
   price: MoneySchema,
   comparisonPrice: MoneySchema.nullable().optional(),
+  searchScore: z.number().default(0),
+  searchScoreBreakdown: SearchScoreBreakdownSchema.optional(),
   rawPayload: z.unknown(),
 });
 export type StoreProductCandidate = z.infer<typeof StoreProductCandidateSchema>;

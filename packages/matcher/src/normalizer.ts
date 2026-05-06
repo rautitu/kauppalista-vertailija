@@ -1,4 +1,5 @@
 import type { CanonicalItem, StoreProductCandidate } from '../../domain/src/index';
+import { pickTopCandidate } from '../../searchers/src/index';
 
 export type UnitFamily = 'mass' | 'volume' | 'count';
 export type CanonicalUnit = 'g' | 'kg' | 'ml' | 'cl' | 'dl' | 'l' | 'kpl';
@@ -42,12 +43,44 @@ export type NormalizedStoreProductCandidate = {
   name: NormalizedName;
 };
 
-export type CandidateMatchReason = 'ean' | 'brand_name';
+export type MatchConfidence = 'high' | 'medium' | 'low';
+
+export type CandidateMatchReason =
+  | 'ean'
+  | 'brand_size_tokens'
+  | 'brand_tokens'
+  | 'size_tokens'
+  | 'tokens_only'
+  | 'search_top_candidates';
+
+export type CandidatePairScoreBreakdown = {
+  eanMatched: boolean;
+  brandMatched: boolean;
+  sizeMatched: boolean;
+  sizeMismatch: boolean;
+  overlapTokens: string[];
+  missingRequiredTokens: string[];
+  leftOnlyTokens: string[];
+  rightOnlyTokens: string[];
+};
+
+export type CandidatePairScore = {
+  score: number;
+  reason: CandidateMatchReason;
+  breakdown: CandidatePairScoreBreakdown;
+};
+
+export type CandidateMatchStatus = 'matched' | 'ambiguous' | 'not_found';
 
 export type CandidateMatch = {
-  left: StoreProductCandidate;
-  right: StoreProductCandidate;
+  status: CandidateMatchStatus;
+  score: number;
+  confidence: number;
+  confidenceLabel: MatchConfidence;
   reason: CandidateMatchReason;
+  reasoning: string[];
+  left: StoreProductCandidate | null;
+  right: StoreProductCandidate | null;
 };
 
 const STOPWORDS = new Set([
@@ -355,6 +388,178 @@ function compactComparableText(value: string) {
   return value.replace(/\s+/g, '');
 }
 
+function intersectTokens(left: string[], right: string[]) {
+  const rightSet = new Set(right);
+  return left.filter((token, index) => rightSet.has(token) && left.indexOf(token) === index);
+}
+
+function tokensEquivalent(left: string[], right: string[]) {
+  const leftJoined = left.join('');
+  const rightJoined = right.join('');
+
+  if (!leftJoined || !rightJoined) {
+    return false;
+  }
+
+  return leftJoined === rightJoined;
+}
+
+function differenceTokens(left: string[], right: string[]) {
+  const rightSet = new Set(right);
+  return left.filter((token, index) => !rightSet.has(token) && left.indexOf(token) === index);
+}
+
+function hasMatchingParsedSize(
+  left: ParsedPackageSize | null,
+  right: ParsedPackageSize | null,
+) {
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.standardizedUnit === right.standardizedUnit &&
+    left.standardizedTotalQuantity === right.standardizedTotalQuantity
+  );
+}
+
+function hasMismatchingSizeFamily(
+  left: ParsedPackageSize | null,
+  right: ParsedPackageSize | null,
+) {
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left.standardizedUnit !== right.standardizedUnit) {
+    return true;
+  }
+
+  return left.standardizedTotalQuantity !== right.standardizedTotalQuantity;
+}
+
+function scoreCandidatePair(
+  leftCandidate: StoreProductCandidate,
+  rightCandidate: StoreProductCandidate,
+): CandidatePairScore {
+  const left = normalizeStoreProductCandidate(leftCandidate);
+  const right = normalizeStoreProductCandidate(rightCandidate);
+  const leftEan = normalizeText(leftCandidate.ean);
+  const rightEan = normalizeText(rightCandidate.ean);
+
+  if (leftEan && rightEan && leftEan === rightEan) {
+    return {
+      score: 100,
+      reason: 'ean',
+      breakdown: {
+        eanMatched: true,
+        brandMatched: (left.brand ?? null) === (right.brand ?? null),
+        sizeMatched: hasMatchingParsedSize(left.parsedSize, right.parsedSize),
+        sizeMismatch: hasMismatchingSizeFamily(left.parsedSize, right.parsedSize),
+        overlapTokens: intersectTokens(left.name.tokens, right.name.tokens),
+        missingRequiredTokens: [],
+        leftOnlyTokens: differenceTokens(left.name.tokens, right.name.tokens),
+        rightOnlyTokens: differenceTokens(right.name.tokens, left.name.tokens),
+      },
+    };
+  }
+
+  const equivalentTokens = tokensEquivalent(left.name.tokens, right.name.tokens);
+  const overlapTokens = equivalentTokens
+    ? Array.from(new Set([...left.name.tokens, ...right.name.tokens]))
+    : intersectTokens(left.name.tokens, right.name.tokens);
+  const leftOnlyTokens = equivalentTokens ? [] : differenceTokens(left.name.tokens, right.name.tokens);
+  const rightOnlyTokens = equivalentTokens ? [] : differenceTokens(right.name.tokens, left.name.tokens);
+  const missingRequiredTokens = [...leftOnlyTokens, ...rightOnlyTokens];
+  const brandMatched = Boolean(left.brand && right.brand && left.brand === right.brand);
+  const sizeMatched = hasMatchingParsedSize(left.parsedSize, right.parsedSize);
+  const sizeMismatch = hasMismatchingSizeFamily(left.parsedSize, right.parsedSize);
+
+  let score = 0;
+
+  if (brandMatched) {
+    score += 40;
+  }
+
+  if (sizeMatched) {
+    score += 30;
+  } else if (sizeMismatch) {
+    score -= 30;
+  }
+
+  score += Math.min(20, Math.max(1, overlapTokens.length) * 10);
+  score -= Math.min(25, missingRequiredTokens.length * 10);
+
+  let reason: CandidateMatchReason = 'tokens_only';
+  if (brandMatched && sizeMatched && overlapTokens.length > 0) {
+    reason = 'brand_size_tokens';
+  } else if (brandMatched && overlapTokens.length > 0) {
+    reason = 'brand_tokens';
+  } else if (sizeMatched && overlapTokens.length > 0) {
+    reason = 'size_tokens';
+  }
+
+  return {
+    score,
+    reason,
+    breakdown: {
+      eanMatched: false,
+      brandMatched,
+      sizeMatched,
+      sizeMismatch,
+      overlapTokens,
+      missingRequiredTokens,
+      leftOnlyTokens,
+      rightOnlyTokens,
+    },
+  };
+}
+
+function toConfidence(score: number) {
+  if (score >= 90) {
+    return { confidence: 1, confidenceLabel: 'high' as const };
+  }
+
+  if (score >= 70) {
+    return { confidence: 0.92, confidenceLabel: 'high' as const };
+  }
+
+  if (score >= 50) {
+    return { confidence: 0.72, confidenceLabel: 'medium' as const };
+  }
+
+  if (score >= 30) {
+    return { confidence: 0.45, confidenceLabel: 'low' as const };
+  }
+
+  return { confidence: 0, confidenceLabel: 'low' as const };
+}
+
+function buildReasoning(score: CandidatePairScore) {
+  const reasons: string[] = [];
+
+  if (score.breakdown.eanMatched) {
+    reasons.push('EAN matched exactly');
+  }
+  if (score.breakdown.brandMatched) {
+    reasons.push('brand matched');
+  }
+  if (score.breakdown.sizeMatched) {
+    reasons.push('package size matched');
+  }
+  if (score.breakdown.overlapTokens.length > 0) {
+    reasons.push(`shared tokens: ${score.breakdown.overlapTokens.join(', ')}`);
+  }
+  if (score.breakdown.missingRequiredTokens.length > 0) {
+    reasons.push(`token mismatch: ${score.breakdown.missingRequiredTokens.join(', ')}`);
+  }
+  if (score.breakdown.sizeMismatch) {
+    reasons.push('package size mismatch');
+  }
+
+  return reasons;
+}
+
 export function createStoreProductFallbackKey(candidate: StoreProductCandidate) {
   const normalized = normalizeStoreProductCandidate(candidate);
   const brand = normalized.brand ?? 'unknown';
@@ -370,39 +575,67 @@ export function createStoreProductKey(candidate: StoreProductCandidate) {
 export function findBestCandidateMatch(
   leftCandidates: StoreProductCandidate[],
   rightCandidates: StoreProductCandidate[],
-): CandidateMatch | null {
-  const rightByEan = new Map<string, StoreProductCandidate>();
-  const rightByFallbackKey = new Map<string, StoreProductCandidate>();
+  randomFn?: () => number,
+): CandidateMatch {
+  const left = pickTopCandidate(leftCandidates, randomFn);
+  const right = pickTopCandidate(rightCandidates, randomFn);
 
-  for (const candidate of rightCandidates) {
-    const normalizedEan = normalizeText(candidate.ean);
-    if (normalizedEan && !rightByEan.has(normalizedEan)) {
-      rightByEan.set(normalizedEan, candidate);
-    }
-
-    const fallbackKey = createStoreProductFallbackKey(candidate);
-    if (!rightByFallbackKey.has(fallbackKey)) {
-      rightByFallbackKey.set(fallbackKey, candidate);
-    }
+  if (!left || !right) {
+    return {
+      status: 'not_found',
+      score: 0,
+      confidence: 0,
+      confidenceLabel: 'low',
+      reason: 'tokens_only',
+      reasoning: ['no top candidates available'],
+      left: null,
+      right: null,
+    };
   }
 
-  for (const candidate of leftCandidates) {
-    const normalizedEan = normalizeText(candidate.ean);
-    if (normalizedEan) {
-      const right = rightByEan.get(normalizedEan);
-      if (right) {
-        return { left: candidate, right, reason: 'ean' };
-      }
-    }
+  const scored = scoreCandidatePair(left, right);
+  const { confidence, confidenceLabel } = toConfidence(scored.score);
+
+  if (scored.score < 50) {
+    return {
+      status: 'not_found',
+      score: scored.score,
+      confidence: 0,
+      confidenceLabel: 'low',
+      reason: scored.reason,
+      reasoning: buildReasoning(scored),
+      left,
+      right,
+    };
   }
 
-  for (const candidate of leftCandidates) {
-    const fallbackKey = createStoreProductFallbackKey(candidate);
-    const right = rightByFallbackKey.get(fallbackKey);
-    if (right) {
-      return { left: candidate, right, reason: 'brand_name' };
-    }
+  if (scored.score < 70) {
+    return {
+      status: 'ambiguous',
+      score: scored.score,
+      confidence: Math.min(confidence, 0.6),
+      confidenceLabel: 'medium',
+      reason: 'search_top_candidates',
+      reasoning: [
+        'matching only the top-scored search candidate from each store',
+        ...buildReasoning(scored),
+      ],
+      left,
+      right,
+    };
   }
 
-  return null;
+  return {
+    status: 'matched',
+    score: scored.score,
+    confidence,
+    confidenceLabel,
+    reason: scored.reason,
+    reasoning: [
+      'matched using top-1 search candidate from each store',
+      ...buildReasoning(scored),
+    ],
+    left,
+    right,
+  };
 }
