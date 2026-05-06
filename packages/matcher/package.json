@@ -9,7 +9,8 @@
     "build": "tsc --noEmit -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "test:actual:valio-kevyt-maito": "RUN_ACTUAL_MATCHER_TESTS=true KESKO_ACTUAL_TEST_TIMEOUT_MS=60000 S_GROUP_ACTUAL_TEST_TIMEOUT_MS=60000 bun test ./src/matcher.test.actual.valio.kevyt.maito.ts"
+    "test:actual:valio-kevyt-maito": "RUN_ACTUAL_MATCHER_TESTS=true KESKO_ACTUAL_TEST_TIMEOUT_MS=60000 S_GROUP_ACTUAL_TEST_TIMEOUT_MS=60000 bun test ./src/matcher.test.actual.valio.kevyt.maito.ts",
+    "test:actual:cross-store-queries": "RUN_ACTUAL_MATCHER_TESTS=true KESKO_ACTUAL_TEST_TIMEOUT_MS=60000 S_GROUP_ACTUAL_TEST_TIMEOUT_MS=60000 bun test ./src/matcher.test.actual.cross-store-queries.ts"
   },
   "dependencies": {
     "@kauppalista/domain": "workspace:*",
