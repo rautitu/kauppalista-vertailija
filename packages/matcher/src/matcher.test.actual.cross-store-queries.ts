@@ -24,7 +24,7 @@ const QUERIES = [
   'rexona miesten deodorantti',
 ] as const;
 
-const WAIT_BETWEEN_QUERIES_MS = Number(process.env.ACTUAL_MATCHER_WAIT_BETWEEN_QUERIES_MS ?? 5_000);
+const WAIT_BETWEEN_QUERIES_MS = Number(process.env.ACTUAL_MATCHER_WAIT_BETWEEN_QUERIES_MS ?? 2_000);
 
 function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
