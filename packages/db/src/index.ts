@@ -47,7 +47,7 @@ export type ComparisonRunItemRecord = {
   comparisonRunId: string;
   canonicalItemId: string;
   inputItem: Record<string, unknown>;
-  status: 'matched' | 'ambiguous' | 'not_found';
+  status: 'matched' | 'ambiguous' | 'not_found' | 'mismatch';
   rowOrder?: number;
   kMatchId?: string | null;
   sMatchId?: string | null;
@@ -404,7 +404,7 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
       comparisonPrice?: number | null;
       score: number;
       confidence: number;
-      status: 'matched' | 'ambiguous' | 'not_found';
+      status: 'matched' | 'ambiguous' | 'not_found' | 'mismatch';
       rawPayload?: unknown;
     }) =>
       withClient(async (client) => {
