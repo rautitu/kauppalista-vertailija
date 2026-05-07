@@ -24,6 +24,8 @@ const QUERIES = [
   'rexona miesten deodorantti',
 ] as const;
 
+const WAIT_BETWEEN_QUERIES_MS = Number(process.env.ACTUAL_MATCHER_WAIT_BETWEEN_QUERIES_MS ?? 5_000);
+
 function formatMoney(value: number | null | undefined) {
   return value == null ? '-' : `${value.toFixed(2)} €`;
 }
@@ -56,6 +58,10 @@ function printCandidateSummary(sourceLabel: string, query: string, candidates: S
 
   console.log(`\n[${sourceLabel}] Top 5 querylle: "${query}"`);
   console.table(summary);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function printMatchSummary(query: string, match: ReturnType<typeof findBestCandidateMatch>) {
@@ -110,7 +116,12 @@ describe('matcher actual APIs: cross-store query smoke test', () => {
     const keskoSearcher = new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH });
     const sGroupSearcher = new SGroupSearcher();
 
-    for (const query of QUERIES) {
+    for (const [index, query] of QUERIES.entries()) {
+      if (index > 0 && WAIT_BETWEEN_QUERIES_MS > 0) {
+        console.log(`\n[Testi] Odotetaan ${WAIT_BETWEEN_QUERIES_MS} ms ennen seuraavaa hakua...`);
+        await sleep(WAIT_BETWEEN_QUERIES_MS);
+      }
+
       printSearchStart('K-Ruoka', KESKO_STORE, query, KESKO_ACTUAL_TEST_TIMEOUT_MS);
       const keskoPromise = keskoSearcher.searchProducts({
         storeId: KESKO_STORE.id,
@@ -135,5 +146,9 @@ describe('matcher actual APIs: cross-store query smoke test', () => {
       const match = findBestCandidateMatch(keskoResult.candidates, sGroupResult.candidates, () => 0);
       printMatchSummary(query, match);
     }
-  }, QUERIES.length * (KESKO_ACTUAL_TEST_TIMEOUT_MS + S_GROUP_ACTUAL_TEST_TIMEOUT_MS) + 30_000);
+  },
+  QUERIES.length * (KESKO_ACTUAL_TEST_TIMEOUT_MS + S_GROUP_ACTUAL_TEST_TIMEOUT_MS)
+    + Math.max(0, QUERIES.length - 1) * WAIT_BETWEEN_QUERIES_MS
+    + 30_000,
+  );
 });
