@@ -219,6 +219,16 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
           `
             INSERT INTO canonical_items (id, name, brand, manufacturer, size, unit, category, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (id)
+            DO UPDATE SET
+              name = EXCLUDED.name,
+              brand = EXCLUDED.brand,
+              manufacturer = EXCLUDED.manufacturer,
+              size = EXCLUDED.size,
+              unit = EXCLUDED.unit,
+              category = EXCLUDED.category,
+              metadata = EXCLUDED.metadata,
+              updated_at = NOW()
             RETURNING id, name, brand, manufacturer, size::float8 AS size, unit, category, metadata
           `,
           [
@@ -426,6 +436,21 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
               raw_payload
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+            ON CONFLICT (store_id, store_product_id)
+            DO UPDATE SET
+              canonical_item_id = EXCLUDED.canonical_item_id,
+              product_name = EXCLUDED.product_name,
+              brand = EXCLUDED.brand,
+              size = EXCLUDED.size,
+              unit = EXCLUDED.unit,
+              price = EXCLUDED.price,
+              comparison_price = EXCLUDED.comparison_price,
+              score = EXCLUDED.score,
+              confidence = EXCLUDED.confidence,
+              status = EXCLUDED.status,
+              raw_payload = EXCLUDED.raw_payload,
+              last_seen_at = NOW(),
+              updated_at = NOW()
             RETURNING id
           `,
           [

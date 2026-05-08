@@ -77,20 +77,40 @@ function deriveRowStatus(
   sStatus: MatchStatus,
   validation?: CrossStoreValidationResult,
 ): MatchStatus {
-  if (validation?.status === 'mismatch') {
-    return 'mismatch';
+  if (kStatus === 'not_found' || sStatus === 'not_found') {
+    if (validation?.status === 'matched') {
+      return 'matched';
+    }
+
+    if (validation?.reason === 'brand_mismatch' || validation?.reason === 'size_mismatch') {
+      return 'mismatch';
+    }
+
+    if (kStatus === 'ambiguous' || sStatus === 'ambiguous') {
+      return 'ambiguous';
+    }
+
+    return 'not_found';
   }
 
-  if (kStatus === 'matched' && sStatus === 'matched') {
+  if (validation?.status === 'matched') {
     return 'matched';
+  }
+
+  if (validation?.reason === 'brand_mismatch' || validation?.reason === 'size_mismatch') {
+    return 'mismatch';
   }
 
   if (kStatus === 'ambiguous' || sStatus === 'ambiguous') {
     return 'ambiguous';
   }
 
-  if (kStatus === 'not_found' || sStatus === 'not_found') {
-    return 'not_found';
+  if (validation?.status === 'mismatch') {
+    return 'mismatch';
+  }
+
+  if (kStatus === 'matched' && sStatus === 'matched') {
+    return 'matched';
   }
 
   return 'mismatch';
@@ -183,6 +203,22 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
       }
 
       const totals = createTotals(rows);
+
+      for (const item of input.shoppingList) {
+        await deps.db.createCanonicalItem({
+          id: item.id,
+          name: item.name,
+          brand: item.brand ?? null,
+          manufacturer: item.manufacturer ?? null,
+          size: item.size ?? null,
+          unit: item.unit ?? null,
+          category: item.category ?? null,
+          metadata: {
+            synonyms: item.synonyms,
+            aliases: item.aliases,
+          },
+        });
+      }
 
       await deps.db.createComparisonRun({
         id: runId,

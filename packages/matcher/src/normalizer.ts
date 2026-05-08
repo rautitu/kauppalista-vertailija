@@ -637,6 +637,18 @@ export function validateCrossStoreMatch(
   const normalizedLeftText = compactComparableText(left.name.comparisonText);
   const normalizedRightText = compactComparableText(right.name.comparisonText);
   const sameCoreText = normalizedLeftText.length > 0 && normalizedLeftText === normalizedRightText;
+  const bothCoreTextsEmpty = normalizedLeftText.length === 0 && normalizedRightText.length === 0;
+
+  if (bothCoreTextsEmpty && hasMatchingParsedSize(left.parsedSize, right.parsedSize)) {
+    return {
+      status: 'matched',
+      confidence: left.brand && right.brand ? 0.84 : 0.72,
+      reason: 'incomplete_data',
+      details: ['package size aligned', 'no extra core tokens remained after normalization'],
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
 
   if (!sameCoreText && overlapTokens.length === 0) {
     details.push('no shared core tokens between matched products');
