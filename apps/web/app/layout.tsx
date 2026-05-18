@@ -1,16 +1,15 @@
 import type { ReactNode } from 'react';
+import './globals.css';
 
 export const metadata = {
   title: 'Kauppalista vertailija',
-  description: 'Projektin perustus valmis',
+  description: 'Kauppalistan hintavertailu K-ruoan ja S-kauppojen välillä',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="fi">
-      <body style={{ fontFamily: 'sans-serif', margin: 0, background: '#f4f4f5', color: '#111827' }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

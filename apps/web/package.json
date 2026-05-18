@@ -2,9 +2,9 @@
   "name": "@kauppalista/web",
   "private": true,
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "dev": "next dev --hostname 0.0.0.0 --port 51112",
     "build": "next build",
-    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "start": "next start --hostname 0.0.0.0 --port 51112",
     "check": "tsc --noEmit"
   },
   "dependencies": {
