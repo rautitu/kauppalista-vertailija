@@ -78,7 +78,7 @@ export type StoreRecord = {
   metadata?: Record<string, unknown>;
 };
 
-export type StoreUpsertRecord = Omit<StoreRecord, 'id'>;
+export type StoreUpsertRecord = Omit<StoreRecord, 'id' | 'source'>;
 
 function quoteIdentifier(identifier: string) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
@@ -365,6 +365,171 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
           isActive: row.is_active,
           metadata: row.metadata,
         })) satisfies StoreRecord[];
+      }),
+
+    searchStores: (input: {
+      source?: 'k-ruoka' | 's-kaupat';
+      query?: string;
+      includeInactive?: boolean;
+      limit?: number;
+    }) =>
+      withClient(async (client) => {
+        const normalizedLimit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+        const tokens = (input.query ?? '')
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((token) => `%${token}%`);
+        const result = await client.query<{
+          id: string;
+          source: 'k-ruoka' | 's-kaupat';
+          external_id: string;
+          name: string;
+          city: string | null;
+          address: string | null;
+          postal_code: string | null;
+          is_active: boolean;
+          metadata: Record<string, unknown>;
+        }>(
+          `
+            SELECT id, source, external_id, name, city, address, postal_code, is_active, metadata
+            FROM stores
+            WHERE ($1::text IS NULL OR source = $1)
+              AND ($2::boolean OR is_active = TRUE)
+              AND (
+                cardinality($3::text[]) = 0
+                OR (
+                  SELECT bool_and(
+                    name ILIKE query_token.token
+                    OR COALESCE(city, '') ILIKE query_token.token
+                    OR COALESCE(address, '') ILIKE query_token.token
+                    OR external_id ILIKE query_token.token
+                  )
+                  FROM unnest($3::text[]) AS query_token(token)
+                )
+              )
+            ORDER BY source ASC, name ASC
+            LIMIT $4
+          `,
+          [input.source ?? null, input.includeInactive ?? false, tokens, normalizedLimit],
+        );
+
+        return result.rows.map((row) => ({
+          id: row.id,
+          source: row.source,
+          externalId: row.external_id,
+          name: row.name,
+          city: row.city,
+          address: row.address,
+          postalCode: row.postal_code,
+          isActive: row.is_active,
+          metadata: row.metadata,
+        })) satisfies StoreRecord[];
+      }),
+
+    getStoreById: (id: string) =>
+      withClient(async (client) => {
+        const result = await client.query<{
+          id: string;
+          source: 'k-ruoka' | 's-kaupat';
+          external_id: string;
+          name: string;
+          city: string | null;
+          address: string | null;
+          postal_code: string | null;
+          is_active: boolean;
+          metadata: Record<string, unknown>;
+        }>(
+          `
+            SELECT id, source, external_id, name, city, address, postal_code, is_active, metadata
+            FROM stores
+            WHERE id = $1
+          `,
+          [id],
+        );
+
+        const row = result.rows[0];
+        if (!row) {
+          return null;
+        }
+
+        return {
+          id: row.id,
+          source: row.source,
+          externalId: row.external_id,
+          name: row.name,
+          city: row.city,
+          address: row.address,
+          postalCode: row.postal_code,
+          isActive: row.is_active,
+          metadata: row.metadata,
+        } satisfies StoreRecord;
+      }),
+
+    searchCanonicalItems: (input: { query?: string; limit?: number }) =>
+      withClient(async (client) => {
+        const normalizedLimit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+        const tokens = (input.query ?? '')
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((token) => `%${token}%`);
+        const result = await client.query<CanonicalItemRecord & { aliases: string[] }>(
+          `
+            SELECT
+              item.id,
+              item.name,
+              item.brand,
+              item.manufacturer,
+              item.size::float8 AS size,
+              item.unit,
+              item.category,
+              item.metadata,
+              COALESCE(
+                array_agg(alias.alias ORDER BY alias.alias) FILTER (WHERE alias.alias IS NOT NULL),
+                ARRAY[]::text[]
+              ) AS aliases
+            FROM canonical_items item
+            LEFT JOIN canonical_item_aliases alias ON alias.canonical_item_id = item.id
+            WHERE (
+              cardinality($1::text[]) = 0
+              OR (
+                SELECT bool_and(
+                  item.name ILIKE query_token.token
+                  OR COALESCE(item.brand, '') ILIKE query_token.token
+                  OR COALESCE(item.category, '') ILIKE query_token.token
+                  OR EXISTS (
+                    SELECT 1
+                    FROM canonical_item_aliases matching_alias
+                    WHERE matching_alias.canonical_item_id = item.id
+                      AND matching_alias.alias ILIKE query_token.token
+                  )
+                )
+                FROM unnest($1::text[]) AS query_token(token)
+              )
+            )
+            GROUP BY item.id, item.name, item.brand, item.manufacturer, item.size, item.unit, item.category, item.metadata
+            ORDER BY item.name ASC
+            LIMIT $2
+          `,
+          [tokens, normalizedLimit],
+        );
+
+        return result.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          brand: row.brand,
+          manufacturer: row.manufacturer,
+          size: row.size,
+          unit: row.unit,
+          category: row.category,
+          metadata: row.metadata,
+          aliases: row.aliases.map((alias) => ({
+            id: alias,
+            alias,
+            aliasType: 'search',
+          })),
+        })) satisfies CanonicalItemWithAliases[];
       }),
 
     getCanonicalItemWithAliases: (id: string) =>
