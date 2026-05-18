@@ -20,8 +20,8 @@ docker compose up --build
 
 Services:
 
-- Web: http://localhost:3000
-- API health: http://localhost:3001/health
+- Web: http://localhost:51112
+- API health: http://localhost:51111/health
 - Postgres: `localhost:51110`
 
 ## Port policy
@@ -30,6 +30,8 @@ Ports reserved for this project should always follow the `5111*` series whenever
 
 Current reservation:
 - Postgres host port: `51110`
+- API port: `51111`
+- Web port: `51112`
 
 ## API contracts
 

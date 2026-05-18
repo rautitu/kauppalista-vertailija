@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComparisonRunItem, ComparisonRunTotals, MatchStatus, StoreSource } from "@kauppalista/domain";
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001").replace(/\/$/, "");
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:51111").replace(/\/$/, "");
 const STORAGE_KEY = "kauppalista-vertailija:mvp-inputs";
 
 type StoreOption = {

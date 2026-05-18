@@ -7,5 +7,5 @@ RUN bun install
 COPY apps/web apps/web
 COPY packages/domain packages/domain
 RUN bun run --filter @kauppalista/web build
-EXPOSE 3000
+EXPOSE 51112
 CMD ["bun", "run", "--filter", "@kauppalista/web", "start"]

@@ -20,15 +20,15 @@ services:
       context: .
       dockerfile: ./infra/docker/api.Dockerfile
     environment:
-      PORT: 3001
+      PORT: 51111
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "3001:3001"
+      - "51111:51111"
     healthcheck:
-      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:3001/health').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:51111/health').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -38,15 +38,15 @@ services:
       context: .
       dockerfile: ./infra/docker/web.Dockerfile
     environment:
-      PORT: 3000
-      API_BASE_URL: http://api:3001
+      PORT: 51112
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:51111
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "51112:51112"
     healthcheck:
-      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:3000').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
+      test: ["CMD", "bun", "-e", "await fetch('http://127.0.0.1:51112').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -8,5 +8,5 @@ RUN bun install
 COPY apps/api apps/api
 COPY packages/domain packages/domain
 COPY packages/db packages/db
-EXPOSE 3001
+EXPOSE 51111
 CMD ["bun", "run", "--filter", "@kauppalista/api", "start"]
