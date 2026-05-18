@@ -128,6 +128,15 @@ async function runSqlFiles(queryable: Queryable, directory: string) {
   }
 }
 
+function normalizeSearchText(value: string | null | undefined) {
+  return (value ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export async function runMigrations(options: DatabaseConnectionOptions = {}) {
   const { connectionString, schema } = getDatabaseConfig(options);
   const client = new Client({ connectionString });
@@ -379,7 +388,7 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
           .trim()
           .split(/\s+/)
           .filter(Boolean)
-          .map((token) => `%${token}%`);
+          .map(normalizeSearchText);
         const result = await client.query<{
           id: string;
           source: 'k-ruoka' | 's-kaupat';
@@ -396,35 +405,32 @@ export function createDatabase(options: DatabaseConnectionOptions = {}) {
             FROM stores
             WHERE ($1::text IS NULL OR source = $1)
               AND ($2::boolean OR is_active = TRUE)
-              AND (
-                cardinality($3::text[]) = 0
-                OR (
-                  SELECT bool_and(
-                    name ILIKE query_token.token
-                    OR COALESCE(city, '') ILIKE query_token.token
-                    OR COALESCE(address, '') ILIKE query_token.token
-                    OR external_id ILIKE query_token.token
-                  )
-                  FROM unnest($3::text[]) AS query_token(token)
-                )
-              )
             ORDER BY source ASC, name ASC
-            LIMIT $4
           `,
-          [input.source ?? null, input.includeInactive ?? false, tokens, normalizedLimit],
+          [input.source ?? null, input.includeInactive ?? false],
         );
 
-        return result.rows.map((row) => ({
-          id: row.id,
-          source: row.source,
-          externalId: row.external_id,
-          name: row.name,
-          city: row.city,
-          address: row.address,
-          postalCode: row.postal_code,
-          isActive: row.is_active,
-          metadata: row.metadata,
-        })) satisfies StoreRecord[];
+        return result.rows
+          .filter((row) => {
+            if (tokens.length === 0) {
+              return true;
+            }
+
+            const haystack = normalizeSearchText([row.name, row.city, row.address, row.external_id].filter(Boolean).join(' '));
+            return tokens.every((token) => haystack.includes(token));
+          })
+          .slice(0, normalizedLimit)
+          .map((row) => ({
+            id: row.id,
+            source: row.source,
+            externalId: row.external_id,
+            name: row.name,
+            city: row.city,
+            address: row.address,
+            postalCode: row.postal_code,
+            isActive: row.is_active,
+            metadata: row.metadata,
+          })) satisfies StoreRecord[];
       }),
 
     getStoreById: (id: string) =>

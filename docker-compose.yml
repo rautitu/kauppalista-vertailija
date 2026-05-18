@@ -15,6 +15,17 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  migrate:
+    build:
+      context: .
+      dockerfile: ./infra/docker/api.Dockerfile
+    command: ["bun", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -22,9 +33,10 @@ services:
     environment:
       PORT: 51111
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+      KESKO_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "51111:51111"
     healthcheck:
@@ -57,9 +69,10 @@ services:
       dockerfile: ./infra/docker/worker.Dockerfile
     environment:
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+    command: ["sh", "-c", "bun run sync:stores && bun run --filter @kauppalista/worker start"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

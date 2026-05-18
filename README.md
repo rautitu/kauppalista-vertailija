@@ -18,6 +18,14 @@ bun install
 docker compose up --build
 ```
 
+For local development without Compose, initialize the database and store directory with:
+
+```bash
+bun run db:setup
+```
+
+`db:setup` applies migrations and refreshes store records through the worker sync path. `db:seed:test` only loads a small deterministic test seed.
+
 Services:
 
 - Web: http://localhost:51112

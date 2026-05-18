@@ -322,11 +322,23 @@ export function createApiApp(deps: ApiDependencies = {}) {
       sSearcher: createStoreIdMappedSearcher(deps.sSearcher ?? new SGroupSearcher(), sStore),
       createRunId: deps.createRunId,
     });
-    const result = await engine.runComparison({
-      selectedKStore: toDomainStore(kStore),
-      selectedSStore: toDomainStore(sStore),
-      shoppingList: toInputCanonicalItems(request.searchTerms),
-    });
+
+    let result: Awaited<ReturnType<typeof engine.runComparison>>;
+    try {
+      result = await engine.runComparison({
+        selectedKStore: toDomainStore(kStore),
+        selectedSStore: toDomainStore(sStore),
+        shoppingList: toInputCanonicalItems(request.searchTerms),
+      });
+    } catch (error) {
+      console.error('Comparison run failed', error);
+      return c.json(
+        {
+          error: error instanceof Error ? error.message : 'Comparison run failed.',
+        },
+        502,
+      );
+    }
 
     return c.json({ comparisonRun: result.comparisonRun }, 201);
   });
