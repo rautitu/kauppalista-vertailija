@@ -1,7 +1,7 @@
 :root {
-  color-scheme: light;
-  background: #f6f7f9;
-  color: #17202a;
+  color-scheme: dark;
+  background: #1e1f22;
+  color: #f2f3f5;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -12,13 +12,19 @@
 
 body {
   margin: 0;
-  background: #f6f7f9;
-  color: #17202a;
+  background:
+    radial-gradient(circle at top left, rgba(88, 101, 242, 0.18), transparent 34rem),
+    #1e1f22;
+  color: #f2f3f5;
 }
 
 button,
 input {
   font: inherit;
+}
+
+button {
+  color: inherit;
 }
 
 .app-shell {
@@ -43,26 +49,16 @@ input {
 
 .topbar p {
   margin: 6px 0 0;
-  color: #667085;
-}
-
-.api-base {
-  flex: 0 0 auto;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  color: #475467;
-  font-size: 0.82rem;
-  padding: 7px 9px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
+  color: #b5bac1;
 }
 
 .comparison-form,
 .results,
 .loading {
-  border: 1px solid #d0d5dd;
+  border: 1px solid #3f4147;
   border-radius: 8px;
-  background: #ffffff;
+  background: #2b2d31;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
 }
 
 .comparison-form {
@@ -73,6 +69,7 @@ input {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .field {
@@ -81,7 +78,7 @@ input {
 
 .field-label {
   display: block;
-  color: #344054;
+  color: #dbdee1;
   font-size: 0.9rem;
   font-weight: 700;
   margin-bottom: 7px;
@@ -93,18 +90,22 @@ input {
 
 input {
   width: 100%;
-  border: 1px solid #c6ccd5;
+  border: 1px solid #4e5058;
   border-radius: 6px;
-  background: #ffffff;
-  color: #17202a;
+  background: #1e1f22;
+  color: #f2f3f5;
   min-height: 42px;
   padding: 9px 11px;
   outline: none;
 }
 
+input::placeholder {
+  color: #80848e;
+}
+
 input:focus {
-  border-color: #177245;
-  box-shadow: 0 0 0 3px rgba(23, 114, 69, 0.14);
+  border-color: #5865f2;
+  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.24);
 }
 
 .clear-button {
@@ -115,9 +116,15 @@ input:focus {
   height: 30px;
   border: 0;
   border-radius: 5px;
-  background: #eef1f4;
-  color: #475467;
+  background: #383a40;
+  color: #b5bac1;
   cursor: pointer;
+}
+
+.clear-button:hover,
+.clear-button:focus {
+  background: #4e5058;
+  color: #f2f3f5;
 }
 
 .combo input {
@@ -132,10 +139,10 @@ input:focus {
   right: 0;
   max-height: 300px;
   overflow: auto;
-  border: 1px solid #c6ccd5;
+  border: 1px solid #4e5058;
   border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 14px 32px rgba(16, 24, 40, 0.14);
+  background: #2b2d31;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
 }
 
 .combo-row,
@@ -151,25 +158,25 @@ input:focus {
   align-items: flex-start;
   gap: 3px;
   border: 0;
-  border-bottom: 1px solid #edf0f3;
-  background: #ffffff;
-  color: #17202a;
+  border-bottom: 1px solid #3f4147;
+  background: #2b2d31;
+  color: #f2f3f5;
   cursor: pointer;
   text-align: left;
 }
 
 .combo-option:hover,
 .combo-option:focus {
-  background: #edf7f1;
+  background: #35373c;
 }
 
 .combo-option span,
 .muted {
-  color: #667085;
+  color: #b5bac1;
 }
 
 .error-text {
-  color: #b42318;
+  color: #ffb3ad;
 }
 
 .term-list {
@@ -177,17 +184,16 @@ input:focus {
   gap: 8px;
 }
 
-.comparison-form .field + .field,
 .store-grid + .field {
   margin-top: 18px;
 }
 
 .alert {
   margin-top: 16px;
-  border: 1px solid #f1a7a1;
+  border: 1px solid #da373c;
   border-radius: 6px;
-  background: #fff3f2;
-  color: #912018;
+  background: rgba(218, 55, 60, 0.12);
+  color: #ffb3ad;
   padding: 10px 12px;
 }
 
@@ -201,7 +207,7 @@ input:focus {
 .actions button {
   border: 0;
   border-radius: 6px;
-  background: #177245;
+  background: #5865f2;
   color: #ffffff;
   cursor: pointer;
   font-weight: 750;
@@ -209,20 +215,26 @@ input:focus {
   padding: 0 16px;
 }
 
+.actions button:hover,
+.actions button:focus {
+  background: #4752c4;
+}
+
 .actions button:disabled {
-  background: #98a2b3;
+  background: #4e5058;
+  color: #949ba4;
   cursor: not-allowed;
 }
 
 .actions span {
-  color: #667085;
+  color: #b5bac1;
   font-size: 0.9rem;
 }
 
 .loading {
   margin-top: 16px;
   padding: 14px 16px;
-  color: #344054;
+  color: #dbdee1;
 }
 
 .results {
@@ -244,7 +256,7 @@ input:focus {
 
 .section-heading p {
   margin: 5px 0 0;
-  color: #667085;
+  color: #b5bac1;
   font-size: 0.9rem;
   overflow-wrap: anywhere;
 }
@@ -268,23 +280,23 @@ input:focus {
 }
 
 .status-matched {
-  background: #e6f4ea;
-  color: #176c3a;
+  background: rgba(35, 165, 90, 0.18);
+  color: #6ee7a0;
 }
 
 .status-ambiguous {
-  background: #fff4d6;
-  color: #8a5a00;
+  background: rgba(240, 178, 50, 0.18);
+  color: #ffd37a;
 }
 
 .status-not_found {
-  background: #eef1f4;
-  color: #475467;
+  background: #383a40;
+  color: #b5bac1;
 }
 
 .status-mismatch {
-  background: #ffe7e3;
-  color: #9f2a1d;
+  background: rgba(218, 55, 60, 0.18);
+  color: #ff9a94;
 }
 
 .totals {
@@ -295,14 +307,15 @@ input:focus {
 }
 
 .totals div {
-  border: 1px solid #d0d5dd;
+  border: 1px solid #3f4147;
   border-radius: 8px;
+  background: #232428;
   padding: 12px;
 }
 
 .totals span {
   display: block;
-  color: #667085;
+  color: #b5bac1;
   font-size: 0.84rem;
   margin-bottom: 5px;
 }
@@ -317,8 +330,9 @@ input:focus {
 }
 
 .result-row {
-  border: 1px solid #d0d5dd;
+  border: 1px solid #3f4147;
   border-radius: 8px;
+  background: #232428;
   padding: 12px;
 }
 
@@ -344,9 +358,9 @@ input:focus {
 .row-index,
 .source-label {
   align-items: center;
-  background: #eef1f4;
+  background: #383a40;
   border-radius: 5px;
-  color: #475467;
+  color: #dbdee1;
   display: inline-flex;
   font-size: 0.78rem;
   font-weight: 750;
@@ -362,8 +376,9 @@ input:focus {
 }
 
 .product-cell {
-  border: 1px solid #edf0f3;
+  border: 1px solid #3f4147;
   border-radius: 7px;
+  background: #2b2d31;
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -376,13 +391,13 @@ input:focus {
 }
 
 .product-cell span:not(.source-label) {
-  color: #667085;
+  color: #b5bac1;
   font-size: 0.88rem;
 }
 
 .reason {
-  border-top: 1px solid #edf0f3;
-  color: #667085;
+  border-top: 1px solid #3f4147;
+  color: #b5bac1;
   font-size: 0.9rem;
   margin: 10px 0 0;
   padding-top: 10px;

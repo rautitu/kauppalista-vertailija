@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { createComparisonEngine } from '@kauppalista/engine';
 import { KeskoSearcher, SGroupSearcher, type ProductSearcher } from '@kauppalista/searchers';
 import { checkDatabaseHealth, createDatabase, type StoreRecord } from '@kauppalista/db';
@@ -176,6 +177,16 @@ export function createApiApp(deps: ApiDependencies = {}) {
   const app = new Hono();
   const db = deps.db ?? createDatabase();
   const healthcheck = deps.checkDatabaseHealth ?? checkDatabaseHealth;
+
+  app.use(
+    '*',
+    cors({
+      origin: ['http://localhost:51112', 'http://127.0.0.1:51112'],
+      allowHeaders: ['Content-Type'],
+      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      maxAge: 86400,
+    }),
+  );
 
   app.get('/', (c) => {
     return c.json({

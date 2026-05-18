@@ -409,7 +409,6 @@ export default function HomePage() {
           <h1>Kauppalista-vertailija</h1>
           <p>Valitse kaupat, syötä hakusanat ja aja vertailu.</p>
         </div>
-        <span className="api-base">API {API_BASE_URL}</span>
       </header>
 
       <form className="comparison-form" onSubmit={submitComparison}>
