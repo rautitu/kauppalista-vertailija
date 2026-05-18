@@ -61,15 +61,25 @@ function createStoreIdMappedSearcher(
   return {
     source: searcher.source,
     async searchProducts(request: ProductSearchRequest) {
-      const externalStoreId = storeIdMap[request.storeId];
+      const internalStoreId = request.storeId;
+      const externalStoreId = storeIdMap[internalStoreId];
       if (!externalStoreId) {
         throw new Error(`No external store id mapping for ${searcher.source} storeId ${request.storeId}`);
       }
 
-      return searcher.searchProducts({
+      const result = await searcher.searchProducts({
         ...request,
         storeId: externalStoreId,
       });
+
+      return {
+        ...result,
+        storeId: internalStoreId,
+        candidates: result.candidates.map((candidate) => ({
+          ...candidate,
+          storeId: internalStoreId,
+        })),
+      };
     },
   };
 }
