@@ -174,7 +174,7 @@ describe('phase 9 comparison engine', () => {
     expect(persisted?.totals).toMatchObject({ kTotal: 3.58, sTotal: 3.38 });
   });
 
-  test('preserves top-1 ambiguous and mismatch selections while marking unresolved status', async () => {
+  test('persists the strongest cross-store pair while marking unresolved status', async () => {
     const selectedKStore: Store = {
       source: 'k-ruoka',
       storeId: '11111111-1111-1111-1111-111111111111',
@@ -315,5 +315,109 @@ describe('phase 9 comparison engine', () => {
     expect(persisted?.items[0]?.sMatchId).toBeTruthy();
     expect(persisted?.items[1]?.kMatchId).toBeTruthy();
     expect(persisted?.items[1]?.sMatchId).toBeTruthy();
+  });
+
+  test('selects the strongest cross-store pair instead of raw top-1 results', async () => {
+    const selectedKStore: Store = {
+      source: 'k-ruoka',
+      storeId: '11111111-1111-1111-1111-111111111111',
+      storeName: 'K-Supermarket Keskusta',
+      city: 'Tampere',
+      address: 'Hämeenkatu 10',
+    };
+    const selectedSStore: Store = {
+      source: 's-kaupat',
+      storeId: '22222222-2222-2222-2222-222222222222',
+      storeName: 'Prisma Koivistonkylä',
+      city: 'Tampere',
+      address: 'Koivistontie 1',
+    };
+
+    const shoppingList: CanonicalItem[] = [
+      {
+        id: 'item-milk-1l-best-pair',
+        name: 'Kevytmaito',
+        brand: 'Valio',
+        manufacturer: 'Valio',
+        size: 1,
+        unit: 'l',
+        category: 'milk',
+        synonyms: [],
+        aliases: [],
+      },
+    ];
+
+    const engine = createComparisonEngine({
+      db,
+      now: () => new Date('2026-05-07T11:00:00.000Z'),
+      createRunId: () => 'phase9-run-3',
+      kSearcher: {
+        source: 'k-ruoka',
+        async searchProducts(request) {
+          return {
+            source: 'k-ruoka',
+            storeId: request.storeId,
+            query: request.query,
+            candidates: [
+              makeCandidate('k-ruoka', request.storeId, 'k-top-1', 'Valio vapaan lehmän kevytmaito 1 l', 1.28, {
+                brand: 'Valio',
+                size: 1,
+                unit: 'l',
+                searchScore: 100,
+              }),
+              makeCandidate('k-ruoka', request.storeId, 'k-best-pair', 'Valio kevytmaito 1 l', 1.59, {
+                brand: 'Valio',
+                size: 1,
+                unit: 'l',
+                ean: '6408430001111',
+                searchScore: 98,
+              }),
+            ],
+            rawResponse: { ids: ['k-top-1', 'k-best-pair'] },
+          };
+        },
+      },
+      sSearcher: {
+        source: 's-kaupat',
+        async searchProducts(request) {
+          return {
+            source: 's-kaupat',
+            storeId: request.storeId,
+            query: request.query,
+            candidates: [
+              makeCandidate('s-kaupat', request.storeId, 's-top-1', 'Valio Luomu kevytmaito 1 l', 1.09, {
+                brand: 'Valio',
+                size: 1,
+                unit: 'l',
+                searchScore: 100,
+              }),
+              makeCandidate('s-kaupat', request.storeId, 's-best-pair', 'Valio kevytmaito 1 l', 1.49, {
+                brand: 'Valio',
+                size: 1,
+                unit: 'l',
+                ean: '6408430001111',
+                searchScore: 97,
+              }),
+            ],
+            rawResponse: { ids: ['s-top-1', 's-best-pair'] },
+          };
+        },
+      },
+    });
+
+    const result = await engine.runComparison({ selectedKStore, selectedSStore, shoppingList });
+    const row = result.comparisonRun.matchedRows[0];
+
+    expect(row?.status).toBe('matched');
+    expect(row?.kMatch?.storeProductId).toBe('k-best-pair');
+    expect(row?.sMatch?.storeProductId).toBe('s-best-pair');
+    expect(result.comparisonRun.totals).toEqual({
+      kTotal: 1.59,
+      sTotal: 1.49,
+      difference: 0.1,
+      matchedItems: 1,
+      ambiguousItems: 0,
+      missingItems: 0,
+    });
   });
 });

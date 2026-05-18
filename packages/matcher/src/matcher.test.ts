@@ -359,7 +359,7 @@ describe('matcher normalization', () => {
     expect(match.confidence).toBeGreaterThan(0.9);
   });
 
-  test('returns ambiguous when the top-1 candidates only partially match', () => {
+  test('returns ambiguous when the strongest candidate pair only partially matches', () => {
     const leftCandidates: StoreProductCandidate[] = [
       {
         source: 'k-ruoka',
@@ -397,9 +397,80 @@ describe('matcher normalization', () => {
     const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
 
     expect(match.status).toBe('ambiguous');
-    expect(match.reason).toBe('search_top_candidates');
+    expect(match.reason).toBe('search_candidate_pair');
     expect(match.left?.productId).toBe('left-1');
     expect(match.right?.productId).toBe('right-1');
+  });
+
+  test('selects the best cross-store pair instead of raw top-1 candidates', () => {
+    const leftCandidates: StoreProductCandidate[] = [
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-top-1',
+        key: 'valio|valio vapaan lehman kevytmaito 1 l',
+        ean: null,
+        name: 'Valio vapaan lehmän kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.28,
+        searchScore: 100,
+        rawPayload: {},
+      },
+      {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        productId: 'left-best-pair',
+        key: '6408430001111',
+        ean: '6408430001111',
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.59,
+        searchScore: 98,
+        rawPayload: {},
+      },
+    ];
+
+    const rightCandidates: StoreProductCandidate[] = [
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-top-1',
+        key: 'valio|valio luomu kevytmaito 1 l',
+        ean: null,
+        name: 'Valio Luomu kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.09,
+        searchScore: 100,
+        rawPayload: {},
+      },
+      {
+        source: 's-kaupat',
+        storeId: 's-1',
+        productId: 'right-best-pair',
+        key: '6408430001111',
+        ean: '6408430001111',
+        name: 'Valio kevytmaito 1 l',
+        brand: 'Valio',
+        size: 1,
+        unit: 'l',
+        price: 1.49,
+        searchScore: 97,
+        rawPayload: {},
+      },
+    ];
+
+    const match = findBestCandidateMatch(leftCandidates, rightCandidates, () => 0);
+
+    expect(match.status).toBe('matched');
+    expect(match.reason).toBe('ean');
+    expect(match.left?.productId).toBe('left-best-pair');
+    expect(match.right?.productId).toBe('right-best-pair');
   });
 
   test('returns not_found when candidates clearly mismatch', () => {

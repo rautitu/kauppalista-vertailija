@@ -176,21 +176,21 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
 
         searchLogs.push(...itemLogs);
 
-        const kTop = kSearch.candidates[0] ?? null;
-        const sTop = sSearch.candidates[0] ?? null;
         const pairMatch = findBestCandidateMatch(kSearch.candidates, sSearch.candidates, () => 0);
+        const kBest = pairMatch.left;
+        const sBest = pairMatch.right;
 
-        const kStatus: MatchStatus = kTop ? (pairMatch.left ? pairMatch.status : 'not_found') : 'not_found';
-        const sStatus: MatchStatus = sTop ? (pairMatch.right ? pairMatch.status : 'not_found') : 'not_found';
+        const kStatus: MatchStatus = kBest ? pairMatch.status : 'not_found';
+        const sStatus: MatchStatus = sBest ? pairMatch.status : 'not_found';
 
-        const kMatch = kTop
-          ? mapCandidateToProductMatch(item, kTop, kStatus, kTop.searchScore, pairMatch.left ? pairMatch.confidence : 0, pairMatch.reason)
+        const kMatch = kBest
+          ? mapCandidateToProductMatch(item, kBest, kStatus, kBest.searchScore, pairMatch.confidence, pairMatch.reason)
           : null;
-        const sMatch = sTop
-          ? mapCandidateToProductMatch(item, sTop, sStatus, sTop.searchScore, pairMatch.right ? pairMatch.confidence : 0, pairMatch.reason)
+        const sMatch = sBest
+          ? mapCandidateToProductMatch(item, sBest, sStatus, sBest.searchScore, pairMatch.confidence, pairMatch.reason)
           : null;
 
-        const crossStoreValidation = kTop && sTop ? validateCrossStoreMatch(kTop, sTop) : undefined;
+        const crossStoreValidation = kBest && sBest ? validateCrossStoreMatch(kBest, sBest) : undefined;
         const rowStatus = deriveRowStatus(kMatch?.status ?? 'not_found', sMatch?.status ?? 'not_found', crossStoreValidation);
 
         rows.push({
