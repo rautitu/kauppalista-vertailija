@@ -7,6 +7,7 @@ import {
   ACTUAL_VALIO_KEVYT_MAITO_S_GROUP_STORE as S_GROUP_STORE,
   KeskoSearcher,
   looksLikeRequestedValioKevytMaito,
+  type ProductSearchRequest,
   type ProductSearcher,
   SGroupSearcher,
 } from '../../searchers/src/index';
@@ -23,22 +24,6 @@ const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgresql://kauppalista:kauppalista@localhost:51110/kauppalista';
 
 const liveTest = RUN_ACTUAL_ENGINE_TESTS ? test : test.skip;
-
-const selectedKStore: Store = {
-  source: 'k-ruoka',
-  storeId: KESKO_STORE.id,
-  storeName: KESKO_STORE.name,
-  city: 'Tampere',
-  address: null,
-};
-
-const selectedSStore: Store = {
-  source: 's-kaupat',
-  storeId: S_GROUP_STORE.id,
-  storeName: S_GROUP_STORE.name,
-  city: 'Tampere',
-  address: null,
-};
 
 const CROSS_STORE_QUERIES = [
   'tuuti 200 ml',
@@ -69,6 +54,26 @@ function createThrottledSearcher(searcher: ProductSearcher, waitMs: number): Pro
   };
 }
 
+function createStoreIdMappedSearcher(
+  searcher: ProductSearcher,
+  storeIdMap: Record<string, string>,
+): ProductSearcher {
+  return {
+    source: searcher.source,
+    async searchProducts(request: ProductSearchRequest) {
+      const externalStoreId = storeIdMap[request.storeId];
+      if (!externalStoreId) {
+        throw new Error(`No external store id mapping for ${searcher.source} storeId ${request.storeId}`);
+      }
+
+      return searcher.searchProducts({
+        ...request,
+        storeId: externalStoreId,
+      });
+    },
+  };
+}
+
 function createSchemaId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -86,6 +91,61 @@ async function withActualDatabase<T>(prefix: string, callback: (db: ReturnType<t
     await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     await db.close();
   }
+}
+
+async function prepareActualStores(db: ReturnType<typeof createDatabase>) {
+  await db.syncStores('k-ruoka', [
+    {
+      externalId: KESKO_STORE.id,
+      name: KESKO_STORE.name,
+      city: 'Tampere',
+      address: null,
+      postalCode: null,
+      isActive: true,
+      metadata: {},
+    },
+  ]);
+
+  await db.syncStores('s-kaupat', [
+    {
+      externalId: S_GROUP_STORE.id,
+      name: S_GROUP_STORE.name,
+      city: 'Tampere',
+      address: null,
+      postalCode: null,
+      isActive: true,
+      metadata: {},
+    },
+  ]);
+
+  const stores = await db.listStores(undefined, true);
+  const kStoreRecord = stores.find((store) => store.source === 'k-ruoka' && store.externalId === KESKO_STORE.id);
+  const sStoreRecord = stores.find((store) => store.source === 's-kaupat' && store.externalId === S_GROUP_STORE.id);
+
+  if (!kStoreRecord || !sStoreRecord) {
+    throw new Error('Failed to prepare actual stores in test schema');
+  }
+
+  return {
+    selectedKStore: {
+      source: 'k-ruoka',
+      storeId: kStoreRecord.id,
+      storeName: kStoreRecord.name,
+      city: kStoreRecord.city ?? null,
+      address: kStoreRecord.address ?? null,
+    } satisfies Store,
+    selectedSStore: {
+      source: 's-kaupat',
+      storeId: sStoreRecord.id,
+      storeName: sStoreRecord.name,
+      city: sStoreRecord.city ?? null,
+      address: sStoreRecord.address ?? null,
+    } satisfies Store,
+    storeIdMap: {
+      [kStoreRecord.id]: kStoreRecord.externalId,
+      [sStoreRecord.id]: sStoreRecord.externalId,
+    },
+  };
 }
 
 function printRowSummary(label: string, row: {
@@ -111,12 +171,16 @@ function printRowSummary(label: string, row: {
 describe('comparison engine actual APIs', () => {
   liveTest('matches and persists Valio kevyt maito end-to-end with live searchers', async () => {
     await withActualDatabase('test_engine_actual_valio', async (db) => {
+      const { selectedKStore, selectedSStore, storeIdMap } = await prepareActualStores(db);
       const engine = createComparisonEngine({
         db,
         now: () => new Date('2026-05-18T12:00:00.000Z'),
         createRunId: () => createSchemaId('actual-engine-valio'),
-        kSearcher: new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH }),
-        sSearcher: new SGroupSearcher(),
+        kSearcher: createStoreIdMappedSearcher(
+          new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH }),
+          storeIdMap,
+        ),
+        sSearcher: createStoreIdMappedSearcher(new SGroupSearcher(), storeIdMap),
       });
 
       const shoppingList: CanonicalItem[] = [
@@ -159,15 +223,22 @@ describe('comparison engine actual APIs', () => {
 
   liveTest('runs a cross-store query smoke test end-to-end with live searchers', async () => {
     await withActualDatabase('test_engine_actual_smoke', async (db) => {
+      const { selectedKStore, selectedSStore, storeIdMap } = await prepareActualStores(db);
       const engine = createComparisonEngine({
         db,
         now: () => new Date('2026-05-18T12:30:00.000Z'),
         createRunId: () => createSchemaId('actual-engine-smoke'),
         kSearcher: createThrottledSearcher(
-          new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH }),
+          createStoreIdMappedSearcher(
+            new KeskoSearcher({ browserExecutablePath: KESKO_BROWSER_EXECUTABLE_PATH }),
+            storeIdMap,
+          ),
           WAIT_BETWEEN_QUERIES_MS,
         ),
-        sSearcher: createThrottledSearcher(new SGroupSearcher(), WAIT_BETWEEN_QUERIES_MS),
+        sSearcher: createThrottledSearcher(
+          createStoreIdMappedSearcher(new SGroupSearcher(), storeIdMap),
+          WAIT_BETWEEN_QUERIES_MS,
+        ),
       });
 
       const shoppingList: CanonicalItem[] = CROSS_STORE_QUERIES.map((query, index) => ({
