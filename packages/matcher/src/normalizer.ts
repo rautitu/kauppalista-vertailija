@@ -1,5 +1,4 @@
 import type { CanonicalItem, StoreProductCandidate } from '../../domain/src/index';
-import { pickTopCandidate } from '../../searchers/src/index';
 
 export type UnitFamily = 'mass' | 'volume' | 'count';
 export type CanonicalUnit = 'g' | 'kg' | 'ml' | 'cl' | 'dl' | 'l' | 'kpl';
@@ -51,7 +50,7 @@ export type CandidateMatchReason =
   | 'brand_tokens'
   | 'size_tokens'
   | 'tokens_only'
-  | 'search_top_candidates';
+  | 'search_candidate_pair';
 
 export type CandidatePairScoreBreakdown = {
   eanMatched: boolean;
@@ -92,6 +91,13 @@ export type CandidateMatch = {
   reasoning: string[];
   left: StoreProductCandidate | null;
   right: StoreProductCandidate | null;
+};
+
+type ScoredCandidatePair = {
+  left: StoreProductCandidate;
+  right: StoreProductCandidate;
+  scored: CandidatePairScore;
+  combinedSearchScore: number;
 };
 
 const STOPWORDS = new Set([
@@ -571,6 +577,51 @@ function buildReasoning(score: CandidatePairScore) {
   return reasons;
 }
 
+function selectBestCandidatePair(
+  leftCandidates: StoreProductCandidate[],
+  rightCandidates: StoreProductCandidate[],
+  randomFn: () => number,
+): ScoredCandidatePair | null {
+  const scoredPairs: ScoredCandidatePair[] = [];
+
+  for (const left of leftCandidates) {
+    for (const right of rightCandidates) {
+      scoredPairs.push({
+        left,
+        right,
+        scored: scoreCandidatePair(left, right),
+        combinedSearchScore: (left.searchScore ?? 0) + (right.searchScore ?? 0),
+      });
+    }
+  }
+
+  if (scoredPairs.length === 0) {
+    return null;
+  }
+
+  scoredPairs.sort((left, right) => {
+    if (right.scored.score !== left.scored.score) {
+      return right.scored.score - left.scored.score;
+    }
+
+    if (right.combinedSearchScore !== left.combinedSearchScore) {
+      return right.combinedSearchScore - left.combinedSearchScore;
+    }
+
+    const leftKey = `${left.left.productId}|${left.right.productId}`;
+    const rightKey = `${right.left.productId}|${right.right.productId}`;
+    return leftKey.localeCompare(rightKey);
+  });
+
+  const best = scoredPairs[0]!;
+  const equallyBest = scoredPairs.filter(
+    (candidate) =>
+      candidate.scored.score === best.scored.score && candidate.combinedSearchScore === best.combinedSearchScore,
+  );
+  const selectedIndex = Math.min(equallyBest.length - 1, Math.floor(randomFn() * equallyBest.length));
+  return equallyBest[selectedIndex] ?? best;
+}
+
 export function createStoreProductFallbackKey(candidate: StoreProductCandidate) {
   const normalized = normalizeStoreProductCandidate(candidate);
   const brand = normalized.brand ?? 'unknown';
@@ -637,6 +688,18 @@ export function validateCrossStoreMatch(
   const normalizedLeftText = compactComparableText(left.name.comparisonText);
   const normalizedRightText = compactComparableText(right.name.comparisonText);
   const sameCoreText = normalizedLeftText.length > 0 && normalizedLeftText === normalizedRightText;
+  const bothCoreTextsEmpty = normalizedLeftText.length === 0 && normalizedRightText.length === 0;
+
+  if (bothCoreTextsEmpty && hasMatchingParsedSize(left.parsedSize, right.parsedSize)) {
+    return {
+      status: 'matched',
+      confidence: left.brand && right.brand ? 0.84 : 0.72,
+      reason: 'incomplete_data',
+      details: ['package size aligned', 'no extra core tokens remained after normalization'],
+      left: leftCandidate,
+      right: rightCandidate,
+    };
+  }
 
   if (!sameCoreText && overlapTokens.length === 0) {
     details.push('no shared core tokens between matched products');
@@ -701,23 +764,22 @@ export function findBestCandidateMatch(
   rightCandidates: StoreProductCandidate[],
   randomFn?: () => number,
 ): CandidateMatch {
-  const left = pickTopCandidate(leftCandidates, randomFn);
-  const right = pickTopCandidate(rightCandidates, randomFn);
+  const bestPair = selectBestCandidatePair(leftCandidates, rightCandidates, randomFn ?? Math.random);
 
-  if (!left || !right) {
+  if (!bestPair) {
     return {
       status: 'not_found',
       score: 0,
       confidence: 0,
       confidenceLabel: 'low',
       reason: 'tokens_only',
-      reasoning: ['no top candidates available'],
+      reasoning: ['no candidate pairs available'],
       left: null,
       right: null,
     };
   }
 
-  const scored = scoreCandidatePair(left, right);
+  const { left, right, scored } = bestPair;
   const { confidence, confidenceLabel } = toConfidence(scored.score);
 
   if (scored.score < 50) {
@@ -739,9 +801,9 @@ export function findBestCandidateMatch(
       score: scored.score,
       confidence: Math.min(confidence, 0.6),
       confidenceLabel: 'medium',
-      reason: 'search_top_candidates',
+      reason: 'search_candidate_pair',
       reasoning: [
-        'matching only the top-scored search candidate from each store',
+        'selected the strongest cross-store candidate pair from search results',
         ...buildReasoning(scored),
       ],
       left,
@@ -756,7 +818,7 @@ export function findBestCandidateMatch(
     confidenceLabel,
     reason: scored.reason,
     reasoning: [
-      'matched using top-1 search candidate from each store',
+      'matched using the strongest cross-store candidate pair from search results',
       ...buildReasoning(scored),
     ],
     left,
