@@ -10,6 +10,13 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@kauppalista/db": ["packages/db/src/index.ts"],
+      "@kauppalista/domain": ["packages/domain/src/index.ts"],
+      "@kauppalista/engine": ["packages/engine/src/index.ts"],
+      "@kauppalista/matcher": ["packages/matcher/src/index.ts"],
+      "@kauppalista/searchers": ["packages/searchers/src/index.ts"]
+    }
   }
 }
