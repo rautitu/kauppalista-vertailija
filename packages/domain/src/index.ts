@@ -130,3 +130,35 @@ export const ComparisonRunSchema = z.object({
   updatedAt: z.coerce.date(),
 });
 export type ComparisonRun = z.infer<typeof ComparisonRunSchema>;
+
+export const CanonicalItemResponseSchema = CanonicalItemSchema.extend({
+  aliases: z.array(NonEmptyStringSchema).default([]),
+});
+export type CanonicalItemResponse = z.infer<typeof CanonicalItemResponseSchema>;
+
+export const CreateCanonicalItemRequestSchema = z.object({
+  id: NonEmptyStringSchema.optional(),
+  name: NonEmptyStringSchema,
+  brand: OptionalTextSchema,
+  manufacturer: OptionalTextSchema,
+  size: OptionalPositiveNumberSchema,
+  unit: OptionalTextSchema,
+  category: OptionalTextSchema,
+  aliases: z.array(NonEmptyStringSchema).default([]),
+  synonyms: z.array(NonEmptyStringSchema).default([]),
+});
+export type CreateCanonicalItemRequest = z.infer<typeof CreateCanonicalItemRequestSchema>;
+
+export const CreateComparisonRunRequestSchema = z.object({
+  selectedKStoreId: NonEmptyStringSchema,
+  selectedSStoreId: NonEmptyStringSchema,
+  searchTerms: z.array(NonEmptyStringSchema).min(1),
+  clientRequestId: NonEmptyStringSchema.optional(),
+});
+export type CreateComparisonRunRequest = z.infer<typeof CreateComparisonRunRequestSchema>;
+
+export const ApiErrorResponseSchema = z.object({
+  error: NonEmptyStringSchema,
+  details: z.unknown().optional(),
+});
+export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;

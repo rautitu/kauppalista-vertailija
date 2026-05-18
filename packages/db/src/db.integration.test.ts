@@ -119,6 +119,15 @@ describe('database schema integration', () => {
     expect(item?.name).toBe('Kaurajuoma');
     expect(item?.aliases.map((alias) => alias.alias)).toContain('oat milk');
 
+    const matchingStores = await db.searchStores({ source: 'k-ruoka', query: 'supermarket keskusta' });
+    expect(matchingStores.map((store) => store.name)).toContain('K-Supermarket Keskusta');
+
+    const matchingItems = await db.searchCanonicalItems({ query: 'oat milk' });
+    expect(matchingItems.map((matchingItem) => matchingItem.id)).toContain('item-oat-milk-1l');
+
+    const kStore = await db.getStoreById(kStoreId!);
+    expect(kStore?.source).toBe('k-ruoka');
+
     const run = await db.getComparisonRunWithItems('integration-run-1');
     expect(run?.items).toHaveLength(1);
     expect(run?.logs).toHaveLength(1);
