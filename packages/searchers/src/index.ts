@@ -75,6 +75,7 @@ const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
 const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
 const DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE = 200;
 const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 6;
+const KESKO_STORE_DIRECTORY_QUERIES = ['k-market', 'k-supermarket', 'k-citymarket'] as const;
 const S_GROUP_PRODUCTS_OPERATION_NAME = 'RemoteFilteredProducts';
 const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $queryString: String, $limit: Int, $from: Int) {
   store(id: $storeId) {
@@ -1052,7 +1053,7 @@ async function searchKeskoProductsWithBrowser(
 async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions = {}) {
   return withKeskoBrowserSession(options, async (page) => {
     const payload = (await page.evaluate(
-      async ({ pageSize, detailsConcurrency, timeoutMs }) => {
+      async ({ pageSize, detailsConcurrency, timeoutMs, queries }) => {
         async function fetchTextWithTimeout(url: string, init: RequestInit = {}) {
           const controller = new AbortController();
           const timeoutId = setTimeout(
@@ -1084,24 +1085,28 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
           }
         }
 
-        async function fetchSearchPage(offset: number) {
+        async function sleep(delayMs: number) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+
+        async function fetchSearchPage(query: string, offset: number) {
           const response = await fetchTextWithTimeout('https://www.k-ruoka.fi/kr-api/stores/search', {
             method: 'POST',
             headers: {
               accept: 'application/json',
               'content-type': 'application/json',
             },
-            body: JSON.stringify({ query: '', offset, limit: pageSize }),
+            body: JSON.stringify({ query, offset, limit: pageSize }),
           });
 
           const body = tryParseJson(response.text) as { results?: Array<Record<string, unknown>>; totalHits?: number; queryId?: string } | null;
           if (response.status !== 200) {
-            throw new Error(`Kesko store search failed with status ${response.status} at offset ${offset}`);
+            throw new Error(`Kesko store search failed with status ${response.status} for query "${query}" at offset ${offset}`);
           }
 
           if (!body) {
             const preview = response.text.slice(0, 160).replace(/\s+/g, ' ');
-            throw new Error(`Kesko store search returned non-JSON payload at offset ${offset}: ${preview}`);
+            throw new Error(`Kesko store search returned non-JSON payload for query "${query}" at offset ${offset}: ${preview}`);
           }
 
           return {
@@ -1192,12 +1197,19 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
           };
         }
 
-        const firstPage = await fetchSearchPage(0);
-        const totalHits = Math.max(firstPage.results.length, firstPage.totalHits ?? firstPage.results.length);
-        const pages = [firstPage];
+        const pages = [];
 
-        for (let offset = pageSize; offset < totalHits; offset += pageSize) {
-          pages.push(await fetchSearchPage(offset));
+        for (const query of queries) {
+          const firstPage = await fetchSearchPage(query, 0);
+          pages.push(firstPage);
+          const totalHits = Math.max(firstPage.results.length, firstPage.totalHits ?? firstPage.results.length);
+
+          for (let offset = pageSize; offset < totalHits; offset += pageSize) {
+            await sleep(400);
+            pages.push(await fetchSearchPage(query, offset));
+          }
+
+          await sleep(600);
         }
 
         const ids = Array.from(new Set(pages.flatMap((searchPage) => searchPage.results.map((result) => result.id))));
@@ -1230,6 +1242,7 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
         pageSize: DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE,
         detailsConcurrency: DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY,
         timeoutMs: Number(process.env.KESKO_BROWSER_FETCH_TIMEOUT_MS ?? DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS),
+        queries: [...KESKO_STORE_DIRECTORY_QUERIES],
       },
     )) as {
       pages?: KeskoStoreDirectorySearchResponse[];
@@ -1389,7 +1402,9 @@ async function loadKeskoStoresFromUrl(url: string, options: StoreDirectoryFetche
 export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {}) {
   try {
     const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
-    console.info(`[sync:stores] Kesko store source=live-browser stores=${stores.length}`);
+    console.info(
+      `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
+    );
     return stores;
   } catch (error) {
     console.warn('Falling back from live Kesko browser directory sync', error);
@@ -1409,6 +1424,14 @@ export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {})
 
   const stores = dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
   console.info(`[sync:stores] Kesko store source=bundled-fixture stores=${stores.length}`);
+  return stores;
+}
+
+export async function getKeskoStoresLive(options: StoreDirectoryFetcherOptions = {}) {
+  const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
+  console.info(
+    `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
+  );
   return stores;
 }
 

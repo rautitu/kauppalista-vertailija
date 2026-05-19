@@ -1,27 +1,43 @@
 import { createDatabase } from '@kauppalista/db';
-import { getKeskoStores, getSGroupStores } from '@kauppalista/searchers';
+import { getKeskoStoresLive, getSGroupStores } from '@kauppalista/searchers';
 
 const db = createDatabase();
 
 export async function syncStoreDirectory() {
   console.info('[sync:stores] Starting store directory sync');
-  const [keskoStores, sGroupStores] = await Promise.all([getKeskoStores(), getSGroupStores()]);
-  console.info(`[sync:stores] Loaded store directories kesko=${keskoStores.length} sGroup=${sGroupStores.length}`);
-
-  const keskoResult = await db.syncStores(
-    'k-ruoka',
-    keskoStores.map((store) => ({
-      source: store.source,
-      externalId: store.externalId,
-      name: store.storeName,
-      city: store.city ?? null,
-      address: store.address ?? null,
-      postalCode: store.postalCode ?? null,
-      isActive: store.isActive ?? true,
-      metadata: store.metadata ?? {},
-    })),
+  const [keskoResult, sGroupStores] = await Promise.all([
+    getKeskoStoresLive()
+      .then((stores) => ({ stores }))
+      .catch((error) => {
+        console.warn('[sync:stores] Kesko live sync failed, preserving existing database stores', error);
+        return { stores: null };
+      }),
+    getSGroupStores(),
+  ]);
+  console.info(
+    `[sync:stores] Loaded store directories kesko=${keskoResult.stores?.length ?? 'preserved-existing'} sGroup=${sGroupStores.length}`,
   );
-  console.info(`[sync:stores] Wrote stores to database source=k-ruoka synced=${keskoResult.synced}`);
+
+  let keskoSynced: number | null = null;
+  if (keskoResult.stores) {
+    const synced = await db.syncStores(
+      'k-ruoka',
+      keskoResult.stores.map((store) => ({
+        source: store.source,
+        externalId: store.externalId,
+        name: store.storeName,
+        city: store.city ?? null,
+        address: store.address ?? null,
+        postalCode: store.postalCode ?? null,
+        isActive: store.isActive ?? true,
+        metadata: store.metadata ?? {},
+      })),
+    );
+    keskoSynced = synced.synced;
+    console.info(`[sync:stores] Wrote stores to database source=k-ruoka synced=${synced.synced}`);
+  } else {
+    console.warn('[sync:stores] Skipped database write for source=k-ruoka and preserved existing rows');
+  }
 
   const sGroupResult = await db.syncStores(
     's-kaupat',
@@ -39,7 +55,7 @@ export async function syncStoreDirectory() {
   console.info(`[sync:stores] Wrote stores to database source=s-kaupat synced=${sGroupResult.synced}`);
 
   return {
-    kesko: keskoResult.synced,
+    kesko: keskoSynced,
     sGroup: sGroupResult.synced,
   };
 }
@@ -49,7 +65,7 @@ async function main() {
 
   if (command === 'sync-stores') {
     const result = await syncStoreDirectory();
-    console.log(`Synced stores: Kesko ${result.kesko}, S-group ${result.sGroup}`);
+    console.log(`Synced stores: Kesko ${result.kesko === null ? 'preserved-existing' : result.kesko}, S-group ${result.sGroup}`);
     await db.close();
     return;
   }
