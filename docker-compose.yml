@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: always
     environment:
       POSTGRES_DB: kauppalista
       POSTGRES_USER: kauppalista
@@ -15,16 +16,29 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  api:
+  migrate:
     build:
       context: .
       dockerfile: ./infra/docker/api.Dockerfile
+    command: ["bun", "run", "db:migrate"]
     environment:
-      PORT: 51111
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: ./infra/docker/api.Dockerfile
+    restart: always
+    environment:
+      PORT: 51111
+      DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+      KESKO_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "51111:51111"
     healthcheck:
@@ -37,9 +51,14 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/web.Dockerfile
+      args:
+        API_INTERNAL_URL: http://api:51111
+        NEXT_PUBLIC_API_BASE_URL: /api
+    restart: always
     environment:
       PORT: 51112
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:51111
+      API_INTERNAL_URL: http://api:51111
+      NEXT_PUBLIC_API_BASE_URL: /api
     depends_on:
       api:
         condition: service_healthy
@@ -55,11 +74,13 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/worker.Dockerfile
+    restart: always
     environment:
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+    command: ["sh", "-c", "bun run sync:stores && bun run --filter @kauppalista/worker start"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:

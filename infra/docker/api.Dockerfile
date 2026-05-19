@@ -1,5 +1,8 @@
 FROM oven/bun:1 AS base
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends chromium \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json bun.lock bunfig.toml tsconfig.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY packages/domain/package.json packages/domain/package.json

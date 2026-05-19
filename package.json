@@ -13,6 +13,7 @@
     "build": "bun run --filter '*' build",
     "check": "bun run --filter '*' check",
     "db:migrate": "bun run --filter @kauppalista/db db:migrate",
+    "db:setup": "bun run db:migrate && bun run sync:stores",
     "db:seed:test": "bun run --filter @kauppalista/db db:seed:test",
     "sync:stores": "bun run --filter @kauppalista/worker sync:stores",
     "test:domain": "bun run --filter @kauppalista/domain test",
