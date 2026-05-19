@@ -887,7 +887,15 @@ async function withKeskoBrowserSession<T>(
     const page = await browser.newPage({
       userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
     });
-    await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => null);
+    await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
+
+    const title = await page.title().catch(() => '');
+    if (title.includes('Just a moment')) {
+      await page
+        .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15_000 })
+        .catch(() => null);
+    }
+
     const task = callback(page as never);
 
     if (!signal) {
@@ -1045,7 +1053,7 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
   return withKeskoBrowserSession(options, async (page) => {
     const payload = (await page.evaluate(
       async ({ pageSize, detailsConcurrency, timeoutMs }) => {
-        async function fetchJsonWithTimeout(url: string, init: RequestInit = {}) {
+        async function fetchTextWithTimeout(url: string, init: RequestInit = {}) {
           const controller = new AbortController();
           const timeoutId = setTimeout(
             () => controller.abort(new Error(`Kesko store directory request timed out after ${timeoutMs} ms`)),
@@ -1060,15 +1068,24 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
 
             return {
               status: response.status,
-              body: await response.json(),
+              headers: Object.fromEntries(Array.from(response.headers)),
+              text: await response.text(),
             };
           } finally {
             clearTimeout(timeoutId);
           }
         }
 
+        function tryParseJson(text: string) {
+          try {
+            return JSON.parse(text);
+          } catch {
+            return null;
+          }
+        }
+
         async function fetchSearchPage(offset: number) {
-          const response = await fetchJsonWithTimeout('https://www.k-ruoka.fi/kr-api/stores/search', {
+          const response = await fetchTextWithTimeout('https://www.k-ruoka.fi/kr-api/stores/search', {
             method: 'POST',
             headers: {
               accept: 'application/json',
@@ -1077,11 +1094,16 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
             body: JSON.stringify({ query: '', offset, limit: pageSize }),
           });
 
+          const body = tryParseJson(response.text) as { results?: Array<Record<string, unknown>>; totalHits?: number; queryId?: string } | null;
           if (response.status !== 200) {
             throw new Error(`Kesko store search failed with status ${response.status} at offset ${offset}`);
           }
 
-          const body = (response.body ?? {}) as { results?: Array<Record<string, unknown>>; totalHits?: number; queryId?: string };
+          if (!body) {
+            const preview = response.text.slice(0, 160).replace(/\s+/g, ' ');
+            throw new Error(`Kesko store search returned non-JSON payload at offset ${offset}: ${preview}`);
+          }
+
           return {
             totalHits: typeof body.totalHits === 'number' ? body.totalHits : undefined,
             queryId: typeof body.queryId === 'string' ? body.queryId : undefined,
@@ -1119,17 +1141,22 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
         }
 
         async function fetchStoreDetails(id: string) {
-          const response = await fetchJsonWithTimeout(`https://www.k-ruoka.fi/kr-api/store/${encodeURIComponent(id)}`, {
+          const response = await fetchTextWithTimeout(`https://www.k-ruoka.fi/kr-api/store/${encodeURIComponent(id)}`, {
             headers: {
               accept: 'application/json',
             },
           });
 
+          const body = tryParseJson(response.text) as Record<string, unknown> | null;
           if (response.status !== 200) {
             throw new Error(`Kesko store details failed with status ${response.status} for ${id}`);
           }
 
-          const body = (response.body ?? {}) as Record<string, unknown>;
+          if (!body) {
+            const preview = response.text.slice(0, 160).replace(/\s+/g, ' ');
+            throw new Error(`Kesko store details returned non-JSON payload for ${id}: ${preview}`);
+          }
+
           const details = body.details && typeof body.details === 'object' ? (body.details as Record<string, unknown>) : {};
 
           return {
