@@ -1361,7 +1361,9 @@ async function loadKeskoStoresFromUrl(url: string, options: StoreDirectoryFetche
 
 export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {}) {
   try {
-    return dedupeStores(await fetchKeskoStoresWithBrowser(options));
+    const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
+    console.info(`[sync:stores] Kesko store source=live-browser stores=${stores.length}`);
+    return stores;
   } catch (error) {
     console.warn('Falling back from live Kesko browser directory sync', error);
   }
@@ -1370,13 +1372,17 @@ export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {})
 
   if (keskoDirectoryUrl) {
     try {
-      return dedupeStores(await loadKeskoStoresFromUrl(keskoDirectoryUrl, options));
+      const stores = dedupeStores(await loadKeskoStoresFromUrl(keskoDirectoryUrl, options));
+      console.info(`[sync:stores] Kesko store source=remote-json-fallback stores=${stores.length} url=${keskoDirectoryUrl}`);
+      return stores;
     } catch (error) {
       console.warn('Falling back to bundled Kesko stores fixture', error);
     }
   }
 
-  return dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
+  const stores = dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
+  console.info(`[sync:stores] Kesko store source=bundled-fixture stores=${stores.length}`);
+  return stores;
 }
 
 export async function getSGroupStores(options: StoreDirectoryFetcherOptions = {}) {

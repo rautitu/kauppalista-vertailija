@@ -4,7 +4,9 @@ import { getKeskoStores, getSGroupStores } from '@kauppalista/searchers';
 const db = createDatabase();
 
 export async function syncStoreDirectory() {
+  console.info('[sync:stores] Starting store directory sync');
   const [keskoStores, sGroupStores] = await Promise.all([getKeskoStores(), getSGroupStores()]);
+  console.info(`[sync:stores] Loaded store directories kesko=${keskoStores.length} sGroup=${sGroupStores.length}`);
 
   const keskoResult = await db.syncStores(
     'k-ruoka',
@@ -19,6 +21,7 @@ export async function syncStoreDirectory() {
       metadata: store.metadata ?? {},
     })),
   );
+  console.info(`[sync:stores] Wrote stores to database source=k-ruoka synced=${keskoResult.synced}`);
 
   const sGroupResult = await db.syncStores(
     's-kaupat',
@@ -33,6 +36,7 @@ export async function syncStoreDirectory() {
       metadata: store.metadata ?? {},
     })),
   );
+  console.info(`[sync:stores] Wrote stores to database source=s-kaupat synced=${sGroupResult.synced}`);
 
   return {
     kesko: keskoResult.synced,
