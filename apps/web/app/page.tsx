@@ -270,7 +270,6 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
       <div className="section-heading">
         <div>
           <h2>Vertailun tulos</h2>
-          <p>Run {run.id}</p>
         </div>
         <div className="status-summary">
           {statusOrder.map((status) => (
