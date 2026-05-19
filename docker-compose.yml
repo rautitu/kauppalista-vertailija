@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: always
     environment:
       POSTGRES_DB: kauppalista
       POSTGRES_USER: kauppalista
@@ -30,6 +31,7 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/api.Dockerfile
+    restart: always
     environment:
       PORT: 51111
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
@@ -49,6 +51,7 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/web.Dockerfile
+    restart: always
     environment:
       PORT: 51112
       NEXT_PUBLIC_API_BASE_URL: http://localhost:51111
@@ -67,6 +70,7 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/worker.Dockerfile
+    restart: always
     environment:
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
     command: ["sh", "-c", "bun run sync:stores && bun run --filter @kauppalista/worker start"]
