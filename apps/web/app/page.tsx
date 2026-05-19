@@ -2,19 +2,16 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComparisonRunItem, ComparisonRunTotals, MatchStatus, StoreSource } from "@kauppalista/domain";
+import {
+  getStoreRehydrationQuery,
+  mergeStoreOptions,
+  normalizeSavedStoreOption,
+  resolveSelectedStoreOption,
+  type StoreOption,
+} from "./store-selection";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/$/, "");
 const STORAGE_KEY = "kauppalista-vertailija:mvp-inputs";
-
-type StoreOption = {
-  id?: string;
-  source: StoreSource;
-  storeId: string;
-  externalId: string;
-  storeName: string;
-  city: string | null;
-  address: string | null;
-};
 
 type SavedInputs = {
   selectedKStore: StoreOption | null;
@@ -87,6 +84,59 @@ function StoreSelect({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchId = useRef(0);
+  const rehydrateId = useRef(0);
+
+  useEffect(() => {
+    if (!selected || isOpen || query.trim() !== "") {
+      return;
+    }
+
+    const resolvedFromStores = resolveSelectedStoreOption(selected, stores);
+    if (resolvedFromStores) {
+      if (resolvedFromStores.storeId !== selected.storeId) {
+        onSelect(resolvedFromStores);
+      }
+
+      return;
+    }
+
+    const currentRehydrateId = ++rehydrateId.current;
+    const params = new URLSearchParams({
+      source,
+      q: getStoreRehydrationQuery(selected),
+      includeInactive: "true",
+      limit: "20",
+    });
+
+    let isCancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/stores?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(await readApiError(response));
+        }
+
+        const body = (await response.json()) as { stores: StoreOption[] };
+        if (isCancelled || currentRehydrateId !== rehydrateId.current) {
+          return;
+        }
+
+        const resolved = resolveSelectedStoreOption(selected, body.stores) ?? selected;
+        setStores((currentStores) => mergeStoreOptions(currentStores, resolved));
+        if (resolved.storeId !== selected.storeId) {
+          onSelect(resolved);
+        }
+      } catch {
+        if (!isCancelled && currentRehydrateId === rehydrateId.current) {
+          setStores((currentStores) => mergeStoreOptions(currentStores, selected));
+        }
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, onSelect, query, selected, source, stores]);
 
   useEffect(() => {
     if (!isOpen && selected && query === "") {
@@ -340,8 +390,8 @@ export default function HomePage() {
 
     try {
       const saved = JSON.parse(raw) as Partial<SavedInputs>;
-      setSelectedKStore(saved.selectedKStore ?? null);
-      setSelectedSStore(saved.selectedSStore ?? null);
+      setSelectedKStore(normalizeSavedStoreOption(saved.selectedKStore, "k-ruoka"));
+      setSelectedSStore(normalizeSavedStoreOption(saved.selectedSStore, "s-kaupat"));
       setSearchTerms(normalizeTerms(saved.searchTerms ?? [""]));
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
