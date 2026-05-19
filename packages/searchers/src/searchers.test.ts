@@ -5,6 +5,8 @@ import sGroupFixture from './fixtures/s-group-search-response.json';
 import {
   KeskoSearcher,
   SGroupSearcher,
+  mapKeskoStoreDirectoryPages,
+  mapKeskoStoreDirectoryRecord,
   mapKeskoSearchResponse,
   mapSGroupSearchResponse,
   pickTopCandidate,
@@ -277,6 +279,102 @@ describe('product searchers', () => {
     });
 
     expect(candidate?.price).toBe(2.49);
+  });
+
+  test('maps Kesko live store directory records with enriched details', () => {
+    const record = mapKeskoStoreDirectoryRecord(
+      {
+        id: 'N195',
+        name: 'K‑Citymarket Helsinki Columbus',
+        slug: 'k-citymarket-helsinki-columbus',
+        location: 'Helsinki',
+        branchCode: 707400,
+        chain: 'kcitymarket',
+        chainAbbreviation: 'kcm',
+        chainName: 'K-Citymarket',
+        isWebStore: true,
+        geo: {
+          latitude: 60.20780092037134,
+          longitude: 25.145233716504944,
+        },
+      },
+      {
+        id: 'N195',
+        name: 'K‑Citymarket Helsinki Columbus',
+        location: 'Helsinki',
+        details: {
+          streetAddress: 'Tyynylaavantie 5',
+          postalCode: '00980',
+          addressLocality: 'Helsinki',
+        },
+      },
+    );
+
+    expect(record).toEqual({
+      source: 'k-ruoka',
+      externalId: 'N195',
+      storeName: 'K‑Citymarket Helsinki Columbus',
+      city: 'Helsinki',
+      address: 'Tyynylaavantie 5',
+      postalCode: '00980',
+      isActive: true,
+      metadata: {
+        slug: 'k-citymarket-helsinki-columbus',
+        chain: 'kcitymarket',
+        chainAbbreviation: 'kcm',
+        chainName: 'K-Citymarket',
+        branchCode: 707400,
+        geo: {
+          latitude: 60.20780092037134,
+          longitude: 25.145233716504944,
+        },
+        isWebStore: true,
+        sourceUrl: 'https://www.k-ruoka.fi/kauppa/k-citymarket-helsinki-columbus',
+        source: 'live-browser',
+      },
+    });
+  });
+
+  test('combines paginated Kesko store pages and details by id', () => {
+    const records = mapKeskoStoreDirectoryPages(
+      [
+        {
+          totalHits: 3,
+          results: [
+            { id: 'N1', name: 'K-Supermarket A', slug: 'k-supermarket-a', location: 'Espoo' },
+            { id: 'N2', name: 'K-Market B', slug: 'k-market-b', location: 'Vantaa' },
+          ],
+        },
+        {
+          totalHits: 3,
+          results: [
+            { id: 'N2', name: 'K-Market B', slug: 'k-market-b', location: 'Vantaa' },
+            { id: 'N3', name: 'K-Market C', slug: 'k-market-c', location: 'Turku' },
+          ],
+        },
+      ],
+      {
+        N2: {
+          id: 'N2',
+          details: {
+            streetAddress: 'Testikatu 2',
+            postalCode: '01300',
+            addressLocality: 'Vantaa',
+          },
+        },
+      },
+    );
+
+    expect(records).toHaveLength(3);
+    expect(records.map((record) => record.externalId)).toEqual(['N1', 'N2', 'N3']);
+    expect(records[1]).toEqual(
+      expect.objectContaining({
+        externalId: 'N2',
+        address: 'Testikatu 2',
+        postalCode: '01300',
+        city: 'Vantaa',
+      }),
+    );
   });
 
   test('keeps raw payload debuggable when mapping directly', () => {
