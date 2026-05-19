@@ -77,6 +77,7 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista
+      KESKO_BROWSER_EXECUTABLE_PATH: /usr/bin/chromium
     command: ["sh", "-c", "bun run sync:stores && bun run --filter @kauppalista/worker start"]
     depends_on:
       migrate:

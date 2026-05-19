@@ -73,6 +73,9 @@ const DEFAULT_BROWSER_USER_AGENT =
 const DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH = '/snap/bin/chromium';
 const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
 const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
+const DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE = 200;
+const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 6;
+const KESKO_STORE_DIRECTORY_QUERIES = ['k-market', 'k-supermarket', 'k-citymarket'] as const;
 const S_GROUP_PRODUCTS_OPERATION_NAME = 'RemoteFilteredProducts';
 const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $queryString: String, $limit: Int, $from: Int) {
   store(id: $storeId) {
@@ -103,6 +106,31 @@ type KeskoStoreSearchResult = {
   shortestName?: string;
   slug?: string;
   location?: string;
+  branchCode?: number;
+  chain?: string;
+  chainAbbreviation?: string;
+  chainName?: string;
+  isWebStore?: boolean;
+  geo?: {
+    latitude?: number;
+    longitude?: number;
+  };
+};
+
+type KeskoStoreDirectorySearchResponse = {
+  results?: KeskoStoreSearchResult[];
+  totalHits?: number;
+  queryId?: string;
+};
+
+type KeskoStoreDetailsResult = KeskoStoreSearchResult & {
+  details?: {
+    name?: string;
+    shortName?: string;
+    streetAddress?: string;
+    postalCode?: string;
+    addressLocality?: string;
+  };
 };
 
 function getFetch(fetchImpl?: FetchLike) {
@@ -462,6 +490,82 @@ function mapKeskoFixture(input: Array<Record<string, unknown>>): StoreDirectoryR
   }));
 }
 
+function readKeskoGeo(value: unknown) {
+  const record = readObject(value);
+  if (!record) {
+    return null;
+  }
+
+  const latitude = readNumberField(record, 'latitude');
+  const longitude = readNumberField(record, 'longitude');
+  if (latitude === null || longitude === null) {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
+
+function toKeskoStoreSourceUrl(slug: string | null) {
+  return slug ? `https://www.k-ruoka.fi/kauppa/${slug}` : null;
+}
+
+function uniqueKeskoStoreResults(pages: KeskoStoreDirectorySearchResponse[]) {
+  const byId = new Map<string, KeskoStoreSearchResult>();
+
+  for (const page of pages) {
+    for (const result of page.results ?? []) {
+      if (result?.id) {
+        byId.set(result.id, result);
+      }
+    }
+  }
+
+  return [...byId.values()];
+}
+
+export function mapKeskoStoreDirectoryRecord(
+  store: KeskoStoreSearchResult,
+  details?: KeskoStoreDetailsResult | null,
+): StoreDirectoryRecord {
+  const detailsRecord = readObject(details?.details);
+  const slug = normalizeText(details?.slug ?? store.slug);
+  const sourceUrl = toKeskoStoreSourceUrl(slug);
+  const detailGeo = readKeskoGeo(details?.geo);
+  const searchGeo = readKeskoGeo(store.geo);
+
+  return {
+    source: 'k-ruoka',
+    externalId: store.id,
+    storeName:
+      normalizeText(store.name ?? details?.name ?? (typeof detailsRecord?.name === 'string' ? detailsRecord.name : null)) ?? store.id,
+    city:
+      normalizeText(
+        (typeof detailsRecord?.addressLocality === 'string' ? detailsRecord.addressLocality : null) ?? details?.location ?? store.location,
+      ) ?? null,
+    address: normalizeText(typeof detailsRecord?.streetAddress === 'string' ? detailsRecord.streetAddress : null),
+    postalCode: normalizeText(typeof detailsRecord?.postalCode === 'string' ? detailsRecord.postalCode : null),
+    isActive: true,
+    metadata: {
+      slug,
+      chain: normalizeText(details?.chain ?? store.chain),
+      chainAbbreviation: normalizeText(details?.chainAbbreviation ?? store.chainAbbreviation),
+      chainName: normalizeText(details?.chainName ?? store.chainName),
+      branchCode: details?.branchCode ?? store.branchCode ?? null,
+      geo: detailGeo ?? searchGeo,
+      isWebStore: details?.isWebStore ?? store.isWebStore ?? null,
+      sourceUrl,
+      source: 'live-browser',
+    },
+  };
+}
+
+export function mapKeskoStoreDirectoryPages(
+  pages: KeskoStoreDirectorySearchResponse[],
+  detailRecords: Record<string, KeskoStoreDetailsResult | undefined> = {},
+) {
+  return uniqueKeskoStoreResults(pages).map((store) => mapKeskoStoreDirectoryRecord(store, detailRecords[store.id]));
+}
+
 function toNumber(value: unknown) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -784,7 +888,15 @@ async function withKeskoBrowserSession<T>(
     const page = await browser.newPage({
       userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
     });
-    await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => null);
+    await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
+
+    const title = await page.title().catch(() => '');
+    if (title.includes('Just a moment')) {
+      await page
+        .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15_000 })
+        .catch(() => null);
+    }
+
     const task = callback(page as never);
 
     if (!signal) {
@@ -938,6 +1050,209 @@ async function searchKeskoProductsWithBrowser(
   }, signal);
 }
 
+async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions = {}) {
+  return withKeskoBrowserSession(options, async (page) => {
+    const payload = (await page.evaluate(
+      async ({ pageSize, detailsConcurrency, timeoutMs, queries }) => {
+        async function fetchTextWithTimeout(url: string, init: RequestInit = {}) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(
+            () => controller.abort(new Error(`Kesko store directory request timed out after ${timeoutMs} ms`)),
+            timeoutMs,
+          );
+
+          try {
+            const response = await fetch(url, {
+              ...init,
+              signal: controller.signal,
+            });
+
+            return {
+              status: response.status,
+              headers: Object.fromEntries(Array.from(response.headers)),
+              text: await response.text(),
+            };
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        }
+
+        function tryParseJson(text: string) {
+          try {
+            return JSON.parse(text);
+          } catch {
+            return null;
+          }
+        }
+
+        async function sleep(delayMs: number) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+
+        async function fetchSearchPage(query: string, offset: number) {
+          const response = await fetchTextWithTimeout('https://www.k-ruoka.fi/kr-api/stores/search', {
+            method: 'POST',
+            headers: {
+              accept: 'application/json',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ query, offset, limit: pageSize }),
+          });
+
+          const body = tryParseJson(response.text) as { results?: Array<Record<string, unknown>>; totalHits?: number; queryId?: string } | null;
+          if (response.status !== 200) {
+            throw new Error(`Kesko store search failed with status ${response.status} for query "${query}" at offset ${offset}`);
+          }
+
+          if (!body) {
+            const preview = response.text.slice(0, 160).replace(/\s+/g, ' ');
+            throw new Error(`Kesko store search returned non-JSON payload for query "${query}" at offset ${offset}: ${preview}`);
+          }
+
+          return {
+            totalHits: typeof body.totalHits === 'number' ? body.totalHits : undefined,
+            queryId: typeof body.queryId === 'string' ? body.queryId : undefined,
+            results: Array.isArray(body.results)
+              ? body.results
+                  .map((result) => ({
+                    id: String(result.id ?? ''),
+                    name: typeof result.name === 'string' ? result.name : undefined,
+                    shortName: typeof result.shortName === 'string' ? result.shortName : undefined,
+                    shortestName: typeof result.shortestName === 'string' ? result.shortestName : undefined,
+                    slug: typeof result.slug === 'string' ? result.slug : undefined,
+                    location: typeof result.location === 'string' ? result.location : undefined,
+                    branchCode: typeof result.branchCode === 'number' ? result.branchCode : undefined,
+                    chain: typeof result.chain === 'string' ? result.chain : undefined,
+                    chainAbbreviation: typeof result.chainAbbreviation === 'string' ? result.chainAbbreviation : undefined,
+                    chainName: typeof result.chainName === 'string' ? result.chainName : undefined,
+                    isWebStore: typeof result.isWebStore === 'boolean' ? result.isWebStore : undefined,
+                    geo:
+                      result.geo && typeof result.geo === 'object'
+                        ? {
+                            latitude:
+                              typeof (result.geo as { latitude?: unknown }).latitude === 'number'
+                                ? (result.geo as { latitude: number }).latitude
+                                : undefined,
+                            longitude:
+                              typeof (result.geo as { longitude?: unknown }).longitude === 'number'
+                                ? (result.geo as { longitude: number }).longitude
+                                : undefined,
+                          }
+                        : undefined,
+                  }))
+                  .filter((result) => result.id.length > 0)
+              : [],
+          };
+        }
+
+        async function fetchStoreDetails(id: string) {
+          const response = await fetchTextWithTimeout(`https://www.k-ruoka.fi/kr-api/store/${encodeURIComponent(id)}`, {
+            headers: {
+              accept: 'application/json',
+            },
+          });
+
+          const body = tryParseJson(response.text) as Record<string, unknown> | null;
+          if (response.status !== 200) {
+            throw new Error(`Kesko store details failed with status ${response.status} for ${id}`);
+          }
+
+          if (!body) {
+            const preview = response.text.slice(0, 160).replace(/\s+/g, ' ');
+            throw new Error(`Kesko store details returned non-JSON payload for ${id}: ${preview}`);
+          }
+
+          const details = body.details && typeof body.details === 'object' ? (body.details as Record<string, unknown>) : {};
+
+          return {
+            id: String(body.id ?? id),
+            name: typeof body.name === 'string' ? body.name : undefined,
+            slug: typeof body.slug === 'string' ? body.slug : undefined,
+            location: typeof body.location === 'string' ? body.location : undefined,
+            branchCode: typeof body.branchCode === 'number' ? body.branchCode : undefined,
+            chain: typeof body.chain === 'string' ? body.chain : undefined,
+            chainAbbreviation: typeof body.chainAbbreviation === 'string' ? body.chainAbbreviation : undefined,
+            chainName: typeof body.chainName === 'string' ? body.chainName : undefined,
+            isWebStore: typeof body.isWebStore === 'boolean' ? body.isWebStore : undefined,
+            geo:
+              body.geo && typeof body.geo === 'object'
+                ? {
+                    latitude:
+                      typeof (body.geo as { latitude?: unknown }).latitude === 'number'
+                        ? (body.geo as { latitude: number }).latitude
+                        : undefined,
+                    longitude:
+                      typeof (body.geo as { longitude?: unknown }).longitude === 'number'
+                        ? (body.geo as { longitude: number }).longitude
+                        : undefined,
+                  }
+                : undefined,
+            details: {
+              name: typeof details.name === 'string' ? details.name : undefined,
+              shortName: typeof details.shortName === 'string' ? details.shortName : undefined,
+              streetAddress: typeof details.streetAddress === 'string' ? details.streetAddress : undefined,
+              postalCode: typeof details.postalCode === 'string' ? details.postalCode : undefined,
+              addressLocality: typeof details.addressLocality === 'string' ? details.addressLocality : undefined,
+            },
+          };
+        }
+
+        const pages = [];
+
+        for (const query of queries) {
+          const firstPage = await fetchSearchPage(query, 0);
+          pages.push(firstPage);
+          const totalHits = Math.max(firstPage.results.length, firstPage.totalHits ?? firstPage.results.length);
+
+          for (let offset = pageSize; offset < totalHits; offset += pageSize) {
+            await sleep(400);
+            pages.push(await fetchSearchPage(query, offset));
+          }
+
+          await sleep(600);
+        }
+
+        const ids = Array.from(new Set(pages.flatMap((searchPage) => searchPage.results.map((result) => result.id))));
+        const detailsById: Record<string, unknown> = {};
+        let nextIndex = 0;
+
+        async function detailWorker() {
+          while (nextIndex < ids.length) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            const id = ids[currentIndex];
+            if (!id) {
+              continue;
+            }
+
+            detailsById[id] = await fetchStoreDetails(id);
+          }
+        }
+
+        await Promise.all(
+          Array.from({ length: Math.max(1, Math.min(detailsConcurrency, ids.length || 1)) }, () => detailWorker()),
+        );
+
+        return {
+          pages,
+          detailsById,
+        };
+      },
+      {
+        pageSize: DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE,
+        detailsConcurrency: DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY,
+        timeoutMs: Number(process.env.KESKO_BROWSER_FETCH_TIMEOUT_MS ?? DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS),
+        queries: [...KESKO_STORE_DIRECTORY_QUERIES],
+      },
+    )) as {
+      pages?: KeskoStoreDirectorySearchResponse[];
+      detailsById?: Record<string, KeskoStoreDetailsResult | undefined>;
+    };
+
+    return mapKeskoStoreDirectoryPages(payload.pages ?? [], payload.detailsById ?? {});
+  }, options.signal);
+}
+
 async function resolveSGroupStoreId(storeId: string, options: SGroupSearcherOptions) {
   if (isSGroupStoreCode(storeId)) {
     return storeId;
@@ -1085,17 +1400,39 @@ async function loadKeskoStoresFromUrl(url: string, options: StoreDirectoryFetche
 }
 
 export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {}) {
+  try {
+    const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
+    console.info(
+      `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
+    );
+    return stores;
+  } catch (error) {
+    console.warn('Falling back from live Kesko browser directory sync', error);
+  }
+
   const keskoDirectoryUrl = options.keskoDirectoryUrl ?? process.env.KESKO_STORES_URL;
 
   if (keskoDirectoryUrl) {
     try {
-      return dedupeStores(await loadKeskoStoresFromUrl(keskoDirectoryUrl, options));
+      const stores = dedupeStores(await loadKeskoStoresFromUrl(keskoDirectoryUrl, options));
+      console.info(`[sync:stores] Kesko store source=remote-json-fallback stores=${stores.length} url=${keskoDirectoryUrl}`);
+      return stores;
     } catch (error) {
       console.warn('Falling back to bundled Kesko stores fixture', error);
     }
   }
 
-  return dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
+  const stores = dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
+  console.info(`[sync:stores] Kesko store source=bundled-fixture stores=${stores.length}`);
+  return stores;
+}
+
+export async function getKeskoStoresLive(options: StoreDirectoryFetcherOptions = {}) {
+  const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
+  console.info(
+    `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
+  );
+  return stores;
 }
 
 export async function getSGroupStores(options: StoreDirectoryFetcherOptions = {}) {
