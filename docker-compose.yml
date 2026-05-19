@@ -51,10 +51,14 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/web.Dockerfile
+      args:
+        API_INTERNAL_URL: http://api:51111
+        NEXT_PUBLIC_API_BASE_URL: /api
     restart: always
     environment:
       PORT: 51112
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:51111
+      API_INTERNAL_URL: http://api:51111
+      NEXT_PUBLIC_API_BASE_URL: /api
     depends_on:
       api:
         condition: service_healthy
