@@ -74,6 +74,7 @@ const DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH = '/snap/bin/chromium';
 const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
 const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
 const DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE = 200;
+const DEFAULT_KESKO_STORE_DIRECTORY_FETCH_DETAILS = false;
 const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 1;
 const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_DELAY_MS = 750;
 const KESKO_STORE_DIRECTORY_QUERIES = ['k-market', 'k-supermarket', 'k-citymarket'] as const;
@@ -1054,7 +1055,7 @@ async function searchKeskoProductsWithBrowser(
 async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions = {}) {
   return withKeskoBrowserSession(options, async (page) => {
     const payload = (await page.evaluate(
-      async ({ pageSize, detailsConcurrency, detailDelayMs, timeoutMs, queries }) => {
+      async ({ pageSize, fetchDetails, detailsConcurrency, detailDelayMs, timeoutMs, queries }) => {
         async function fetchTextWithTimeout(url: string, init: RequestInit = {}) {
           const controller = new AbortController();
           const timeoutId = setTimeout(
@@ -1243,9 +1244,11 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
           }
         }
 
-        await Promise.all(
-          Array.from({ length: Math.max(1, Math.min(detailsConcurrency, ids.length || 1)) }, () => detailWorker()),
-        );
+        if (fetchDetails) {
+          await Promise.all(
+            Array.from({ length: Math.max(1, Math.min(detailsConcurrency, ids.length || 1)) }, () => detailWorker()),
+          );
+        }
 
         return {
           pages,
@@ -1255,6 +1258,8 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
       },
       {
         pageSize: DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE,
+        fetchDetails:
+          (process.env.KESKO_STORE_DIRECTORY_FETCH_DETAILS ?? String(DEFAULT_KESKO_STORE_DIRECTORY_FETCH_DETAILS)) === 'true',
         detailsConcurrency: Number(
           process.env.KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY ?? DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY,
         ),
@@ -1267,6 +1272,10 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
       detailsById?: Record<string, KeskoStoreDetailsResult | undefined>;
       detailErrors?: Array<{ id: string; message: string }>;
     };
+
+    if (!((process.env.KESKO_STORE_DIRECTORY_FETCH_DETAILS ?? String(DEFAULT_KESKO_STORE_DIRECTORY_FETCH_DETAILS)) === 'true')) {
+      console.info('[sync:stores] Kesko store details skipped; using search-page directory data');
+    }
 
     if (payload.detailErrors?.length) {
       console.warn(
