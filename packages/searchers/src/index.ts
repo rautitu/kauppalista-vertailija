@@ -74,7 +74,8 @@ const DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH = '/snap/bin/chromium';
 const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
 const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
 const DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE = 200;
-const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 6;
+const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 1;
+const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_DELAY_MS = 750;
 const KESKO_STORE_DIRECTORY_QUERIES = ['k-market', 'k-supermarket', 'k-citymarket'] as const;
 const S_GROUP_PRODUCTS_OPERATION_NAME = 'RemoteFilteredProducts';
 const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $queryString: String, $limit: Int, $from: Int) {
@@ -1053,7 +1054,7 @@ async function searchKeskoProductsWithBrowser(
 async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions = {}) {
   return withKeskoBrowserSession(options, async (page) => {
     const payload = (await page.evaluate(
-      async ({ pageSize, detailsConcurrency, timeoutMs, queries }) => {
+      async ({ pageSize, detailsConcurrency, detailDelayMs, timeoutMs, queries }) => {
         async function fetchTextWithTimeout(url: string, init: RequestInit = {}) {
           const controller = new AbortController();
           const timeoutId = setTimeout(
@@ -1214,10 +1215,12 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
 
         const ids = Array.from(new Set(pages.flatMap((searchPage) => searchPage.results.map((result) => result.id))));
         const detailsById: Record<string, unknown> = {};
+        const detailErrors: Array<{ id: string; message: string }> = [];
         let nextIndex = 0;
+        let stopDetailFetches = false;
 
         async function detailWorker() {
-          while (nextIndex < ids.length) {
+          while (!stopDetailFetches && nextIndex < ids.length) {
             const currentIndex = nextIndex;
             nextIndex += 1;
             const id = ids[currentIndex];
@@ -1225,7 +1228,18 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
               continue;
             }
 
-            detailsById[id] = await fetchStoreDetails(id);
+            try {
+              detailsById[id] = await fetchStoreDetails(id);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              detailErrors.push({ id, message });
+              if (message.includes('status 429')) {
+                stopDetailFetches = true;
+                break;
+              }
+            }
+
+            await sleep(detailDelayMs);
           }
         }
 
@@ -1236,18 +1250,29 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
         return {
           pages,
           detailsById,
+          detailErrors,
         };
       },
       {
         pageSize: DEFAULT_KESKO_STORE_DIRECTORY_PAGE_SIZE,
-        detailsConcurrency: DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY,
+        detailsConcurrency: Number(
+          process.env.KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY ?? DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY,
+        ),
+        detailDelayMs: Number(process.env.KESKO_STORE_DIRECTORY_DETAILS_DELAY_MS ?? DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_DELAY_MS),
         timeoutMs: Number(process.env.KESKO_BROWSER_FETCH_TIMEOUT_MS ?? DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS),
         queries: [...KESKO_STORE_DIRECTORY_QUERIES],
       },
     )) as {
       pages?: KeskoStoreDirectorySearchResponse[];
       detailsById?: Record<string, KeskoStoreDetailsResult | undefined>;
+      detailErrors?: Array<{ id: string; message: string }>;
     };
+
+    if (payload.detailErrors?.length) {
+      console.warn(
+        `[sync:stores] Kesko store details partially failed; continuing with search-page data failed=${payload.detailErrors.length} first=${payload.detailErrors[0]?.id}: ${payload.detailErrors[0]?.message}`,
+      );
+    }
 
     return mapKeskoStoreDirectoryPages(payload.pages ?? [], payload.detailsById ?? {});
   }, options.signal);

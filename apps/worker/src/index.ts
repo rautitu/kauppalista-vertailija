@@ -3,6 +3,19 @@ import { getKeskoStoresLive, getSGroupStores } from '@kauppalista/searchers';
 
 const db = createDatabase();
 
+function waitForShutdownSignal() {
+  return new Promise<void>((resolve) => {
+    const keepAlive = setInterval(() => {}, 60 * 60 * 1000);
+    const shutdown = () => {
+      clearInterval(keepAlive);
+      resolve();
+    };
+
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+}
+
 export async function syncStoreDirectory() {
   console.info('[sync:stores] Starting store directory sync');
   const [keskoResult, sGroupStores] = await Promise.all([
@@ -71,7 +84,8 @@ async function main() {
   }
 
   console.log('Worker ready. Run `bun src/index.ts sync-stores` to refresh stores.');
-  await new Promise(() => {});
+  await waitForShutdownSignal();
+  await db.close();
 }
 
 await main();
