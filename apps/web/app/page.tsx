@@ -503,7 +503,7 @@ export default function HomePage() {
       logProgress({
         percent: 20,
         label: "Lähetetään vertailu",
-        detail: "Pyydetään API:a käynnistämään vertailu valituilla kaupoilla.",
+        detail: "Lähetetään vertailu valituilla kaupoilla.",
         status: "running",
       });
 
