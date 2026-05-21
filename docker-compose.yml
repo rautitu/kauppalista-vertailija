@@ -31,6 +31,7 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/api.Dockerfile
+    init: true
     restart: always
     environment:
       PORT: 51111
@@ -74,6 +75,7 @@ services:
     build:
       context: .
       dockerfile: ./infra/docker/worker.Dockerfile
+    init: true
     restart: always
     environment:
       DATABASE_URL: postgresql://kauppalista:kauppalista@postgres:5432/kauppalista

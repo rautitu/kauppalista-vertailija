@@ -222,6 +222,10 @@ async function persistSearchLog(
   });
 }
 
+async function closeProductSearchers(searchers: ProductSearcher[]) {
+  await Promise.all(searchers.map((searcher) => searcher.close?.().catch(() => null)));
+}
+
 export function createComparisonEngine(deps: ComparisonEngineDependencies) {
   const now = deps.now ?? (() => new Date());
   const createRunId = deps.createRunId ?? (() => `run-${crypto.randomUUID()}`);
@@ -464,6 +468,8 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
           error,
         });
         throw error;
+      } finally {
+        await closeProductSearchers([deps.kSearcher, deps.sSearcher]);
       }
     },
   };
