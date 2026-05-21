@@ -1,6 +1,8 @@
 export * from './actual.valio.kevyt.maito';
 
 import { writeStructuredLog, type SearchScoreBreakdown, type Store, type StoreProductCandidate, type StoreSource } from '@kauppalista/domain';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
 import keskoFallbackStores from './fixtures/kesko-stores.json';
 
@@ -70,7 +72,7 @@ const DEFAULT_KESKO_BROWSER_URL = 'https://www.k-ruoka.fi/';
 const DEFAULT_S_GROUP_SEARCH_URL = 'https://api.s-kaupat.fi/';
 const DEFAULT_USER_AGENT = 'kauppalista-vertailija/phase-5-product-searchers';
 const DEFAULT_BROWSER_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 const DEFAULT_KESKO_BROWSER_EXECUTABLE_PATH = '/snap/bin/chromium';
 const DEFAULT_KESKO_BROWSER_FETCH_TIMEOUT_MS = 55_000;
 const DEFAULT_KESKO_STORE_LOOKUP_TIMEOUT_MS = 20_000;
@@ -80,6 +82,8 @@ const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_CONCURRENCY = 1;
 const DEFAULT_KESKO_STORE_DIRECTORY_DETAILS_DELAY_MS = 750;
 const KESKO_STORE_DIRECTORY_QUERIES = ['k-market', 'k-supermarket', 'k-citymarket'] as const;
 const S_GROUP_PRODUCTS_OPERATION_NAME = 'RemoteFilteredProducts';
+const execFileAsync = promisify(execFile);
+const chromiumUserAgentCache = new Map<string, Promise<string>>();
 const S_GROUP_PRODUCTS_QUERY = `query RemoteFilteredProducts($storeId: ID!, $queryString: String, $limit: Int, $from: Int) {
   store(id: $storeId) {
     products(queryString: $queryString, limit: $limit, from: $from) {
@@ -919,6 +923,35 @@ function toAbortError(reason?: unknown) {
   return new DOMException('The operation was aborted.', 'AbortError');
 }
 
+export function parseChromiumVersion(versionOutput: string) {
+  return versionOutput.match(/\b(?:Chrome|Chromium)\s+(\d+(?:\.\d+){1,3})\b/)?.[1];
+}
+
+export function buildLinuxChromeUserAgent(chromeVersion: string) {
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+}
+
+async function detectChromiumUserAgent(executablePath: string) {
+  const cached = chromiumUserAgentCache.get(executablePath);
+  if (cached) {
+    return cached;
+  }
+
+  const detected = execFileAsync(executablePath, ['--version'], { timeout: 5_000 })
+    .then(({ stdout, stderr }) => {
+      const version = parseChromiumVersion(`${stdout}\n${stderr}`);
+      return version ? buildLinuxChromeUserAgent(version) : DEFAULT_BROWSER_USER_AGENT;
+    })
+    .catch(() => DEFAULT_BROWSER_USER_AGENT);
+
+  chromiumUserAgentCache.set(executablePath, detected);
+  return detected;
+}
+
+async function resolveKeskoBrowserUserAgent(options: KeskoSearcherOptions, executablePath: string) {
+  return options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? (await detectChromiumUserAgent(executablePath));
+}
+
 async function withKeskoBrowserSession<T>(
   options: KeskoSearcherOptions,
   callback: (page: Awaited<ReturnType<typeof chromium.launch>> extends infer TBrowser ? TBrowser extends { newPage: () => Promise<infer TPage> } ? TPage : never : never) => Promise<T>,
@@ -950,8 +983,9 @@ async function withKeskoBrowserSession<T>(
     }
 
     const task = (async () => {
+      const userAgent = await resolveKeskoBrowserUserAgent(options, executablePath);
       const page = await browser.newPage({
-        userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
+        userAgent,
       });
       await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
 
