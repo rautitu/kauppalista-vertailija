@@ -933,31 +933,9 @@ async function withKeskoBrowserSession<T>(
   });
 
   let abortHandler: (() => void) | undefined;
-
-  try {
-    if (signal?.aborted) {
-      throw toAbortError(signal.reason);
-    }
-
-    const page = await browser.newPage({
-      userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
-    });
-    await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
-
-    const title = await page.title().catch(() => '');
-    if (title.includes('Just a moment')) {
-      await page
-        .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15_000 })
-        .catch(() => null);
-    }
-
-    const task = callback(page as never);
-
-    if (!signal) {
-      return await task;
-    }
-
-    const abortPromise = new Promise<never>((_, reject) => {
+  const abortPromise =
+    signal &&
+    new Promise<never>((_, reject) => {
       abortHandler = () => {
         void browser.close().catch(() => null);
         reject(toAbortError(signal.reason));
@@ -966,7 +944,28 @@ async function withKeskoBrowserSession<T>(
       signal.addEventListener('abort', abortHandler, { once: true });
     });
 
-    return await Promise.race([task, abortPromise]);
+  try {
+    if (signal?.aborted) {
+      throw toAbortError(signal.reason);
+    }
+
+    const task = (async () => {
+      const page = await browser.newPage({
+        userAgent: options.browserUserAgent ?? process.env.KESKO_BROWSER_USER_AGENT ?? DEFAULT_BROWSER_USER_AGENT,
+      });
+      await page.goto(DEFAULT_KESKO_BROWSER_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => null);
+
+      const title = await page.title().catch(() => '');
+      if (title.includes('Just a moment')) {
+        await page
+          .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15_000 })
+          .catch(() => null);
+      }
+
+      return callback(page as never);
+    })();
+
+    return abortPromise ? await Promise.race([task, abortPromise]) : await task;
   } finally {
     if (signal && abortHandler) {
       signal.removeEventListener('abort', abortHandler);

@@ -81,6 +81,50 @@ function buildQuery(item: CanonicalItem) {
     .trim();
 }
 
+function getProductSearchTimeoutMs() {
+  const configured = Number(process.env.PRODUCT_SEARCH_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 65_000;
+}
+
+function getProductSearchDelayMs() {
+  const configured = Number(process.env.PRODUCT_SEARCH_DELAY_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 500;
+}
+
+function wait(ms: number) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+async function searchProductsWithTimeout(
+  searcher: ProductSearcher,
+  request: Parameters<ProductSearcher['searchProducts']>[0],
+) {
+  const timeoutMs = getProductSearchTimeoutMs();
+  const controller = new AbortController();
+  const timeoutError = new Error(
+    `${searcher.source} product search timed out after ${timeoutMs} ms for query "${request.query}"`,
+  );
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      searcher.searchProducts({
+        ...request,
+        signal: request.signal ?? controller.signal,
+      }),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timeoutId!);
+  }
+}
+
 function mapCandidateToProductMatch(
   item: CanonicalItem,
   candidate: StoreProductCandidate,
@@ -200,7 +244,7 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
       });
 
       try {
-      for (const item of input.shoppingList) {
+      for (const [itemIndex, item] of input.shoppingList.entries()) {
         const query = buildQuery(item);
         writeStructuredLog('info', 'comparison.item.search_started', {
           runId,
@@ -215,8 +259,8 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         });
 
         const [kSearch, sSearch] = await Promise.all([
-          deps.kSearcher.searchProducts({ runId, storeId: input.selectedKStore.storeId, query, limit: 10 }),
-          deps.sSearcher.searchProducts({ runId, storeId: input.selectedSStore.storeId, query, limit: 10 }),
+          searchProductsWithTimeout(deps.kSearcher, { runId, storeId: input.selectedKStore.storeId, query, limit: 10 }),
+          searchProductsWithTimeout(deps.sSearcher, { runId, storeId: input.selectedSStore.storeId, query, limit: 10 }),
         ]);
 
         for (const result of [kSearch, sSearch]) {
@@ -288,6 +332,18 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
           status: rowStatus,
           crossStoreValidation,
         });
+
+        if (itemIndex < input.shoppingList.length - 1) {
+          const delayMs = getProductSearchDelayMs();
+          writeStructuredLog('info', 'comparison.item.search_delay', {
+            runId,
+            phase: 'search',
+            delayMs,
+            completedItemId: item.id,
+            nextItemId: input.shoppingList[itemIndex + 1]?.id,
+          });
+          await wait(delayMs);
+        }
       }
 
       const totals = createTotals(rows);
