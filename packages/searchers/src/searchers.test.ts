@@ -5,10 +5,12 @@ import sGroupFixture from './fixtures/s-group-search-response.json';
 import {
   KeskoSearcher,
   SGroupSearcher,
+  buildLinuxChromeUserAgent,
   mapKeskoStoreDirectoryPages,
   mapKeskoStoreDirectoryRecord,
   mapKeskoSearchResponse,
   mapSGroupSearchResponse,
+  parseChromiumVersion,
   pickTopCandidate,
   scoreCandidateAgainstQuery,
 } from './index';
@@ -23,6 +25,14 @@ function createJsonResponse(payload: unknown) {
 }
 
 describe('product searchers', () => {
+  test('builds a realistic Linux Chrome user agent from Chromium version output', () => {
+    expect(parseChromiumVersion('Chromium 148.0.7778.167 snap')).toBe('148.0.7778.167');
+    expect(parseChromiumVersion('Google Chrome 148.0.7778.167')).toBe('148.0.7778.167');
+    expect(buildLinuxChromeUserAgent('148.0.7778.167')).toBe(
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.167 Safari/537.36',
+    );
+  });
+
   test('maps Kesko search responses into store product candidates', async () => {
     const seenUrls: string[] = [];
     const searcher = new KeskoSearcher({

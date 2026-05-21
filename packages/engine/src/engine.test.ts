@@ -8,8 +8,10 @@ const databaseUrl =
   process.env.DATABASE_URL ?? 'postgresql://kauppalista:kauppalista@localhost:51110/kauppalista';
 const schema = `test_phase9_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 const db = createDatabase({ connectionString: databaseUrl, schema });
+const previousSearchDelay = process.env.PRODUCT_SEARCH_DELAY_MS;
 
 beforeAll(async () => {
+  process.env.PRODUCT_SEARCH_DELAY_MS = '0';
   await runMigrations({ connectionString: databaseUrl, schema });
   await runSeeds({ connectionString: databaseUrl, schema });
 });
@@ -17,6 +19,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
   await db.close();
+  if (previousSearchDelay === undefined) {
+    delete process.env.PRODUCT_SEARCH_DELAY_MS;
+  } else {
+    process.env.PRODUCT_SEARCH_DELAY_MS = previousSearchDelay;
+  }
 });
 
 function makeCandidate(
@@ -419,5 +426,171 @@ describe('phase 9 comparison engine', () => {
       ambiguousItems: 0,
       missingItems: 0,
     });
+  });
+
+  test('aborts a product search that does not settle', async () => {
+    const previousTimeout = process.env.PRODUCT_SEARCH_TIMEOUT_MS;
+    process.env.PRODUCT_SEARCH_TIMEOUT_MS = '20';
+
+    const selectedKStore: Store = {
+      source: 'k-ruoka',
+      storeId: '11111111-1111-1111-1111-111111111111',
+      storeName: 'K-Supermarket Keskusta',
+      city: 'Tampere',
+      address: 'Hameenkatu 10',
+    };
+    const selectedSStore: Store = {
+      source: 's-kaupat',
+      storeId: '22222222-2222-2222-2222-222222222222',
+      storeName: 'Prisma Koivistonkylä',
+      city: 'Tampere',
+      address: 'Koivistontie 1',
+    };
+    const shoppingList: CanonicalItem[] = [
+      {
+        id: 'item-timeout',
+        name: 'Karjalanpiirakka',
+        brand: null,
+        manufacturer: null,
+        size: null,
+        unit: null,
+        category: null,
+        synonyms: [],
+        aliases: [],
+      },
+    ];
+
+    let receivedSignal: AbortSignal | undefined;
+    const engine = createComparisonEngine({
+      db,
+      now: () => new Date('2026-05-07T11:00:00.000Z'),
+      createRunId: () => 'phase9-run-timeout',
+      kSearcher: {
+        source: 'k-ruoka',
+        async searchProducts(request) {
+          receivedSignal = request.signal;
+          return new Promise(() => {});
+        },
+      },
+      sSearcher: {
+        source: 's-kaupat',
+        async searchProducts(request) {
+          return {
+            source: 's-kaupat',
+            storeId: request.storeId,
+            query: request.query,
+            candidates: [],
+            rawResponse: { fixture: true },
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(engine.runComparison({ selectedKStore, selectedSStore, shoppingList })).rejects.toThrow(
+        /k-ruoka product search timed out/,
+      );
+      expect(receivedSignal?.aborted).toBe(true);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.PRODUCT_SEARCH_TIMEOUT_MS;
+      } else {
+        process.env.PRODUCT_SEARCH_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
+
+  test('waits between product search batches while keeping stores in the same batch parallel', async () => {
+    const previousDelay = process.env.PRODUCT_SEARCH_DELAY_MS;
+    process.env.PRODUCT_SEARCH_DELAY_MS = '30';
+
+    const selectedKStore: Store = {
+      source: 'k-ruoka',
+      storeId: '11111111-1111-1111-1111-111111111111',
+      storeName: 'K-Supermarket Keskusta',
+      city: 'Tampere',
+      address: 'Hameenkatu 10',
+    };
+    const selectedSStore: Store = {
+      source: 's-kaupat',
+      storeId: '22222222-2222-2222-2222-222222222222',
+      storeName: 'Prisma Koivistonkylä',
+      city: 'Tampere',
+      address: 'Koivistontie 1',
+    };
+    const shoppingList: CanonicalItem[] = [
+      {
+        id: 'item-delay-1',
+        name: 'Maito',
+        brand: null,
+        manufacturer: null,
+        size: null,
+        unit: null,
+        category: null,
+        synonyms: [],
+        aliases: [],
+      },
+      {
+        id: 'item-delay-2',
+        name: 'Leipa',
+        brand: null,
+        manufacturer: null,
+        size: null,
+        unit: null,
+        category: null,
+        synonyms: [],
+        aliases: [],
+      },
+    ];
+    const starts: Array<{ source: 'k-ruoka' | 's-kaupat'; query: string; at: number }> = [];
+
+    const engine = createComparisonEngine({
+      db,
+      now: () => new Date('2026-05-07T11:00:00.000Z'),
+      createRunId: () => 'phase9-run-delay',
+      kSearcher: {
+        source: 'k-ruoka',
+        async searchProducts(request) {
+          starts.push({ source: 'k-ruoka', query: request.query, at: performance.now() });
+          return {
+            source: 'k-ruoka',
+            storeId: request.storeId,
+            query: request.query,
+            candidates: [],
+            rawResponse: { fixture: true },
+          };
+        },
+      },
+      sSearcher: {
+        source: 's-kaupat',
+        async searchProducts(request) {
+          starts.push({ source: 's-kaupat', query: request.query, at: performance.now() });
+          return {
+            source: 's-kaupat',
+            storeId: request.storeId,
+            query: request.query,
+            candidates: [],
+            rawResponse: { fixture: true },
+          };
+        },
+      },
+    });
+
+    try {
+      await engine.runComparison({ selectedKStore, selectedSStore, shoppingList });
+
+      const firstBatch = starts.filter((entry) => entry.query === 'Maito');
+      const secondBatch = starts.filter((entry) => entry.query === 'Leipa');
+      expect(firstBatch).toHaveLength(2);
+      expect(secondBatch).toHaveLength(2);
+      expect(Math.abs(firstBatch[0]!.at - firstBatch[1]!.at)).toBeLessThan(15);
+      expect(Math.min(...secondBatch.map((entry) => entry.at)) - Math.max(...firstBatch.map((entry) => entry.at))).toBeGreaterThanOrEqual(25);
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.PRODUCT_SEARCH_DELAY_MS;
+      } else {
+        process.env.PRODUCT_SEARCH_DELAY_MS = previousDelay;
+      }
+    }
   });
 });

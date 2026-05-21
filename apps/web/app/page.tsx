@@ -12,6 +12,7 @@ import {
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/$/, "");
 const STORAGE_KEY = "kauppalista-vertailija:mvp-inputs";
+const COMPARISON_REQUEST_TIMEOUT_PER_TERM_MS = 80_000;
 
 type SavedInputs = {
   selectedKStore: StoreOption | null;
@@ -492,6 +493,12 @@ export default function HomePage() {
 
     const clientRequestId = createClientRequestId();
     setIsSubmitting(true);
+    const controller = new AbortController();
+    const timeoutMs = Math.max(120_000, submittedTerms.length * COMPARISON_REQUEST_TIMEOUT_PER_TERM_MS);
+    const timeoutId = window.setTimeout(
+      () => controller.abort(new Error(`Vertailupyyntö aikakatkaistiin ${Math.round(timeoutMs / 1000)} sekunnin jälkeen.`)),
+      timeoutMs,
+    );
     try {
       logProgress({
         percent: 20,
@@ -503,6 +510,7 @@ export default function HomePage() {
       const response = await fetch(`${API_BASE_URL}/comparison-runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           clientRequestId,
           selectedKStoreId: selectedKStore.storeId,
@@ -540,6 +548,7 @@ export default function HomePage() {
         status: "error",
       });
     } finally {
+      window.clearTimeout(timeoutId);
       setIsSubmitting(false);
     }
   }
