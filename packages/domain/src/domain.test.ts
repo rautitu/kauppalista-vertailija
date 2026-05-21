@@ -6,6 +6,7 @@ import {
   ProductMatchSchema,
   StoreProductCandidateSchema,
   StoreSchema,
+  writeStructuredLog,
 } from './index';
 
 describe('domain schemas', () => {
@@ -159,5 +160,43 @@ describe('domain schemas', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  test('writes structured JSON logs to standard output', () => {
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (message?: unknown) => {
+      lines.push(String(message));
+    };
+
+    try {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      writeStructuredLog('warn', 'test.event', {
+        phase: 'test',
+        count: 2,
+        error: new Error('boom'),
+        circular,
+      });
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? '{}');
+    expect(parsed).toMatchObject({
+      level: 'warn',
+      event: 'test.event',
+      phase: 'test',
+      count: 2,
+      error: {
+        name: 'Error',
+        message: 'boom',
+      },
+      circular: {
+        self: '[Circular]',
+      },
+    });
+    expect(parsed.timestamp).toEqual(expect.any(String));
   });
 });

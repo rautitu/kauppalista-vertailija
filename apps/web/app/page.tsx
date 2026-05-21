@@ -30,6 +30,35 @@ type ApiErrorResponse = {
   error?: string;
 };
 
+type ComparisonProgress = {
+  percent: number;
+  label: string;
+  detail: string;
+  status: "idle" | "running" | "complete" | "error";
+};
+
+const idleProgress: ComparisonProgress = {
+  percent: 0,
+  label: "Valmis",
+  detail: "Vertailua ei ole käynnissä.",
+  status: "idle",
+};
+
+function createProgressLogger(setProgress: (progress: ComparisonProgress) => void) {
+  return (progress: ComparisonProgress) => {
+    setProgress(progress);
+    console.info("[comparison:progress]", {
+      percent: progress.percent,
+      label: progress.label,
+      status: progress.status,
+    });
+  };
+}
+
+function createClientRequestId() {
+  return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `comparison-${Date.now()}`;
+}
+
 const emptyInputs: SavedInputs = {
   selectedKStore: null,
   selectedSStore: null,
@@ -372,6 +401,27 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
   );
 }
 
+function ComparisonProgressView({ progress }: { progress: ComparisonProgress }) {
+  if (progress.status === "idle") {
+    return null;
+  }
+
+  return (
+    <section className={`progress-panel progress-${progress.status}`} aria-live="polite">
+      <div className="progress-heading">
+        <div>
+          <strong>{progress.label}</strong>
+          <span>{progress.detail}</span>
+        </div>
+        <span>{progress.percent}%</span>
+      </div>
+      <div className="progress-track" aria-label={`Vertailun eteneminen ${progress.percent}%`}>
+        <div className="progress-fill" style={{ width: `${progress.percent}%` }} />
+      </div>
+    </section>
+  );
+}
+
 export default function HomePage() {
   const [selectedKStore, setSelectedKStore] = useState<StoreOption | null>(emptyInputs.selectedKStore);
   const [selectedSStore, setSelectedSStore] = useState<StoreOption | null>(emptyInputs.selectedSStore);
@@ -379,6 +429,7 @@ export default function HomePage() {
   const [result, setResult] = useState<ComparisonRunResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ComparisonProgress>(idleProgress);
   const [hasLoadedSavedInputs, setHasLoadedSavedInputs] = useState(false);
 
   useEffect(() => {
@@ -420,22 +471,51 @@ export default function HomePage() {
     event.preventDefault();
     setError(null);
     setResult(null);
+    const logProgress = createProgressLogger(setProgress);
+    logProgress({
+      percent: 5,
+      label: "Tarkistetaan syötteet",
+      detail: "Varmistetaan kauppavalinnat ja hakusanat.",
+      status: "running",
+    });
 
     if (!selectedKStore || !selectedSStore || submittedTerms.length === 0) {
       setError("Valitse molemmat kaupat ja lisää vähintään yksi hakusana.");
+      logProgress({
+        percent: 0,
+        label: "Vertailu keskeytyi",
+        detail: "Valitse molemmat kaupat ja lisää vähintään yksi hakusana.",
+        status: "error",
+      });
       return;
     }
 
+    const clientRequestId = createClientRequestId();
     setIsSubmitting(true);
     try {
+      logProgress({
+        percent: 20,
+        label: "Lähetetään vertailu",
+        detail: "Lähetetään vertailu valituilla kaupoilla.",
+        status: "running",
+      });
+
       const response = await fetch(`${API_BASE_URL}/comparison-runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          clientRequestId,
           selectedKStoreId: selectedKStore.storeId,
           selectedSStoreId: selectedSStore.storeId,
           searchTerms: submittedTerms,
         }),
+      });
+
+      logProgress({
+        percent: 70,
+        label: "Käsitellään tuloksia",
+        detail: "Tuotehaut, matchaus ja tallennus ovat valmistumassa.",
+        status: "running",
       });
 
       if (!response.ok) {
@@ -444,8 +524,21 @@ export default function HomePage() {
 
       const body = (await response.json()) as { comparisonRun: ComparisonRunResponse };
       setResult(body.comparisonRun);
+      logProgress({
+        percent: 100,
+        label: "Vertailu valmis",
+        detail: "Tulokset ladattu käyttöliittymään.",
+        status: "complete",
+      });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Vertailun suoritus epäonnistui.");
+      const message = requestError instanceof Error ? requestError.message : "Vertailun suoritus epäonnistui.";
+      setError(message);
+      logProgress({
+        percent: 100,
+        label: "Vertailu epäonnistui",
+        detail: message,
+        status: "error",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -478,7 +571,7 @@ export default function HomePage() {
         </div>
       </form>
 
-      {isSubmitting ? <section className="loading">Haetaan tuotteita ja lasketaan vertailua…</section> : null}
+      <ComparisonProgressView progress={progress} />
       {result ? <ResultsView run={result} /> : null}
     </main>
   );

@@ -1,4 +1,5 @@
 import { createDatabase } from '@kauppalista/db';
+import { writeStructuredLog } from '@kauppalista/domain';
 import { getKeskoStoresLive, getSGroupStores } from '@kauppalista/searchers';
 
 const db = createDatabase();
@@ -17,19 +18,32 @@ function waitForShutdownSignal() {
 }
 
 export async function syncStoreDirectory() {
-  console.info('[sync:stores] Starting store directory sync');
+  writeStructuredLog('info', 'worker.store_sync.started', {
+    phase: 'store_sync',
+  });
   const [keskoResult, sGroupStores] = await Promise.all([
     getKeskoStoresLive()
       .then((stores) => ({ stores }))
       .catch((error) => {
-        console.warn('[sync:stores] Kesko live sync failed, preserving existing database stores', error);
+        writeStructuredLog('warn', 'worker.store_sync.kesko_failed_preserving_existing', {
+          phase: 'store_sync',
+          source: 'k-ruoka',
+          error,
+        });
         return { stores: null };
       }),
     getSGroupStores(),
   ]);
-  console.info(
-    `[sync:stores] Loaded store directories kesko=${keskoResult.stores?.length ?? 'preserved-existing'} sGroup=${sGroupStores.length}`,
-  );
+  writeStructuredLog('info', 'worker.store_sync.directories_loaded', {
+    phase: 'store_sync',
+    counts: {
+      kesko: keskoResult.stores?.length ?? null,
+      sGroup: sGroupStores.length,
+    },
+    preservedExisting: {
+      kesko: keskoResult.stores === null,
+    },
+  });
 
   let keskoSynced: number | null = null;
   if (keskoResult.stores) {
@@ -47,9 +61,17 @@ export async function syncStoreDirectory() {
       })),
     );
     keskoSynced = synced.synced;
-    console.info(`[sync:stores] Wrote stores to database source=k-ruoka synced=${synced.synced}`);
+    writeStructuredLog('info', 'worker.store_sync.db_written', {
+      phase: 'store_sync',
+      source: 'k-ruoka',
+      synced: synced.synced,
+    });
   } else {
-    console.warn('[sync:stores] Skipped database write for source=k-ruoka and preserved existing rows');
+    writeStructuredLog('warn', 'worker.store_sync.db_write_skipped', {
+      phase: 'store_sync',
+      source: 'k-ruoka',
+      reason: 'preserving_existing_rows',
+    });
   }
 
   const sGroupResult = await db.syncStores(
@@ -65,7 +87,11 @@ export async function syncStoreDirectory() {
       metadata: store.metadata ?? {},
     })),
   );
-  console.info(`[sync:stores] Wrote stores to database source=s-kaupat synced=${sGroupResult.synced}`);
+  writeStructuredLog('info', 'worker.store_sync.db_written', {
+    phase: 'store_sync',
+    source: 's-kaupat',
+    synced: sGroupResult.synced,
+  });
 
   return {
     kesko: keskoSynced,
@@ -78,12 +104,18 @@ async function main() {
 
   if (command === 'sync-stores') {
     const result = await syncStoreDirectory();
-    console.log(`Synced stores: Kesko ${result.kesko === null ? 'preserved-existing' : result.kesko}, S-group ${result.sGroup}`);
+    writeStructuredLog('info', 'worker.store_sync.completed', {
+      phase: 'store_sync',
+      result,
+    });
     await db.close();
     return;
   }
 
-  console.log('Worker ready. Run `bun src/index.ts sync-stores` to refresh stores.');
+  writeStructuredLog('info', 'worker.ready', {
+    phase: 'worker',
+    commandHint: 'bun src/index.ts sync-stores',
+  });
   await waitForShutdownSignal();
   await db.close();
 }

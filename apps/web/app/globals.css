@@ -71,7 +71,7 @@ button {
 
 .comparison-form,
 .results,
-.loading {
+.progress-panel {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-panel) 92%, #000000 8%);
@@ -248,10 +248,60 @@ input:focus {
   font-size: 0.9rem;
 }
 
-.loading {
+.progress-panel {
   margin-top: 16px;
   padding: 14px 16px;
   color: var(--text);
+}
+
+.progress-heading {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.progress-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.progress-heading strong,
+.progress-heading span {
+  overflow-wrap: anywhere;
+}
+
+.progress-heading span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.progress-heading > span {
+  color: var(--cyan);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.progress-track {
+  background: rgba(40, 42, 54, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, var(--cyan) 0%, var(--green) 100%);
+  border-radius: inherit;
+  height: 100%;
+  min-width: 0;
+  transition: width 220ms ease;
+}
+
+.progress-error .progress-fill {
+  background: linear-gradient(90deg, var(--orange) 0%, var(--red) 100%);
 }
 
 .results {
@@ -428,6 +478,7 @@ input:focus {
 
   .topbar,
   .section-heading,
+  .progress-heading,
   .actions {
     align-items: stretch;
     flex-direction: column;

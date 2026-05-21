@@ -1,4 +1,5 @@
 import { createApiApp } from './app';
+import { writeStructuredLog } from '@kauppalista/domain';
 
 const port = Number(process.env.PORT ?? 51111);
 
@@ -7,4 +8,7 @@ Bun.serve({
   port,
 });
 
-console.log(`API listening on ${port}`);
+writeStructuredLog('info', 'api.server.started', {
+  phase: 'api',
+  port,
+});

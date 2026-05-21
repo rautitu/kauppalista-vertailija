@@ -10,6 +10,7 @@ import {
   type CanonicalItem,
   type HealthStatus,
   type StoreSource,
+  writeStructuredLog,
 } from '@kauppalista/domain';
 
 type Database = ReturnType<typeof createDatabase>;
@@ -299,20 +300,43 @@ export function createApiApp(deps: ApiDependencies = {}) {
   app.post('/comparison-runs', async (c) => {
     const parsed = CreateComparisonRunRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
+      writeStructuredLog('warn', 'api.comparison_run.invalid_request', {
+        phase: 'api',
+        details: parsed.error.flatten(),
+      });
       return c.json({ error: 'Invalid comparison run request.', details: parsed.error.flatten() }, 400);
     }
 
     const request = parsed.data;
+    writeStructuredLog('info', 'api.comparison_run.request_received', {
+      phase: 'api',
+      clientRequestId: request.clientRequestId,
+      selectedKStoreId: request.selectedKStoreId,
+      selectedSStoreId: request.selectedSStoreId,
+      searchTermCount: request.searchTerms.length,
+      searchTerms: request.searchTerms,
+    });
+
     const [kStore, sStore] = await Promise.all([
       getStore(db, request.selectedKStoreId, 'k-ruoka'),
       getStore(db, request.selectedSStoreId, 's-kaupat'),
     ]);
 
     if (!kStore) {
+      writeStructuredLog('warn', 'api.comparison_run.store_not_found', {
+        phase: 'api',
+        source: 'k-ruoka',
+        selectedStoreId: request.selectedKStoreId,
+      });
       return c.json({ error: 'selectedKStoreId was not found for k-ruoka.' }, 404);
     }
 
     if (!sStore) {
+      writeStructuredLog('warn', 'api.comparison_run.store_not_found', {
+        phase: 'api',
+        source: 's-kaupat',
+        selectedStoreId: request.selectedSStoreId,
+      });
       return c.json({ error: 'selectedSStoreId was not found for s-kaupat.' }, 404);
     }
 
@@ -331,7 +355,13 @@ export function createApiApp(deps: ApiDependencies = {}) {
         shoppingList: toInputCanonicalItems(request.searchTerms),
       });
     } catch (error) {
-      console.error('Comparison run failed', error);
+      writeStructuredLog('error', 'api.comparison_run.failed', {
+        phase: 'api',
+        clientRequestId: request.clientRequestId,
+        selectedKStoreId: request.selectedKStoreId,
+        selectedSStoreId: request.selectedSStoreId,
+        error,
+      });
       return c.json(
         {
           error: error instanceof Error ? error.message : 'Comparison run failed.',
@@ -339,6 +369,15 @@ export function createApiApp(deps: ApiDependencies = {}) {
         502,
       );
     }
+
+    writeStructuredLog('info', 'api.comparison_run.completed', {
+      runId: result.comparisonRun.id,
+      phase: 'api',
+      clientRequestId: request.clientRequestId,
+      status: 'created',
+      totals: result.comparisonRun.totals,
+      rowCount: result.comparisonRun.matchedRows.length,
+    });
 
     return c.json({ comparisonRun: result.comparisonRun }, 201);
   });
