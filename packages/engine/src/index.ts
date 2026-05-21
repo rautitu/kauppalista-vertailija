@@ -9,7 +9,7 @@ import type {
   MatchStatus,
   StoreProductCandidate,
 } from '../../domain/src/index';
-import { ComparisonRunSchema } from '../../domain/src/index';
+import { ComparisonRunSchema, writeStructuredLog } from '../../domain/src/index';
 import type { createDatabase } from '../../db/src/index';
 import {
   findBestCandidateMatch,
@@ -43,6 +43,36 @@ export type ComparisonEngineResult = {
   comparisonRun: ComparisonRun;
   searchLogs: ComparisonSearchLog[];
 };
+
+function summarizeCandidate(candidate: StoreProductCandidate | null | undefined) {
+  if (!candidate) {
+    return null;
+  }
+
+  return {
+    source: candidate.source,
+    storeId: candidate.storeId,
+    productId: candidate.productId,
+    name: candidate.name,
+    brand: candidate.brand ?? null,
+    size: candidate.size ?? null,
+    unit: candidate.unit ?? null,
+    price: candidate.price,
+    comparisonPrice: candidate.comparisonPrice ?? null,
+    searchScore: candidate.searchScore,
+    searchScoreBreakdown: candidate.searchScoreBreakdown,
+  };
+}
+
+function summarizeSearchResult(result: ProductSearchResult) {
+  return {
+    source: result.source,
+    storeId: result.storeId,
+    query: result.query,
+    candidateCount: result.candidates.length,
+    topCandidates: result.candidates.slice(0, 3).map(summarizeCandidate),
+  };
+}
 
 function buildQuery(item: CanonicalItem) {
   return [item.brand, item.name, item.size, item.unit]
@@ -159,12 +189,44 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
       const rows: ComparisonRunItem[] = [];
       const searchLogs: ComparisonSearchLog[] = [];
 
+      writeStructuredLog('info', 'comparison.run.started', {
+        runId,
+        phase: 'comparison',
+        itemCount: input.shoppingList.length,
+        stores: {
+          k: input.selectedKStore,
+          s: input.selectedSStore,
+        },
+      });
+
+      try {
       for (const item of input.shoppingList) {
         const query = buildQuery(item);
+        writeStructuredLog('info', 'comparison.item.search_started', {
+          runId,
+          phase: 'search',
+          itemId: item.id,
+          itemName: item.name,
+          query,
+          stores: {
+            k: input.selectedKStore.storeId,
+            s: input.selectedSStore.storeId,
+          },
+        });
+
         const [kSearch, sSearch] = await Promise.all([
-          deps.kSearcher.searchProducts({ storeId: input.selectedKStore.storeId, query, limit: 10 }),
-          deps.sSearcher.searchProducts({ storeId: input.selectedSStore.storeId, query, limit: 10 }),
+          deps.kSearcher.searchProducts({ runId, storeId: input.selectedKStore.storeId, query, limit: 10 }),
+          deps.sSearcher.searchProducts({ runId, storeId: input.selectedSStore.storeId, query, limit: 10 }),
         ]);
+
+        for (const result of [kSearch, sSearch]) {
+          writeStructuredLog('info', 'comparison.search.completed', {
+            runId,
+            phase: 'search',
+            itemId: item.id,
+            ...summarizeSearchResult(result),
+          });
+        }
 
         const itemLogs = [kSearch, sSearch].map((result) => ({
           source: result.source,
@@ -193,6 +255,32 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         const crossStoreValidation = kBest && sBest ? validateCrossStoreMatch(kBest, sBest) : undefined;
         const rowStatus = deriveRowStatus(kMatch?.status ?? 'not_found', sMatch?.status ?? 'not_found', crossStoreValidation);
 
+        writeStructuredLog('info', 'comparison.matcher.completed', {
+          runId,
+          phase: 'matcher',
+          itemId: item.id,
+          query,
+          status: rowStatus,
+          pairStatus: pairMatch.status,
+          score: pairMatch.score,
+          confidence: pairMatch.confidence,
+          confidenceLabel: pairMatch.confidenceLabel,
+          reason: pairMatch.reason,
+          reasoning: pairMatch.reasoning,
+          crossStoreValidation: crossStoreValidation
+            ? {
+                status: crossStoreValidation.status,
+                reason: crossStoreValidation.reason,
+                confidence: crossStoreValidation.confidence,
+                details: crossStoreValidation.details,
+              }
+            : null,
+          selectedCandidates: {
+            k: summarizeCandidate(kBest),
+            s: summarizeCandidate(sBest),
+          },
+        });
+
         rows.push({
           canonicalItem: item,
           kMatch,
@@ -203,6 +291,13 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
       }
 
       const totals = createTotals(rows);
+
+      writeStructuredLog('info', 'comparison.run.matched', {
+        runId,
+        phase: 'comparison',
+        rowCount: rows.length,
+        totals,
+      });
 
       for (const item of input.shoppingList) {
         await deps.db.createCanonicalItem({
@@ -298,7 +393,22 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         updatedAt: createdAt,
       });
 
+      writeStructuredLog('info', 'comparison.run.completed', {
+        runId,
+        phase: 'comparison',
+        rowCount: rows.length,
+        totals,
+      });
+
       return { comparisonRun: run, searchLogs };
+      } catch (error) {
+        writeStructuredLog('error', 'comparison.run.failed', {
+          runId,
+          phase: 'comparison',
+          error,
+        });
+        throw error;
+      }
     },
   };
 }

@@ -1,10 +1,11 @@
 export * from './actual.valio.kevyt.maito';
 
-import type { SearchScoreBreakdown, Store, StoreProductCandidate, StoreSource } from '@kauppalista/domain';
+import { writeStructuredLog, type SearchScoreBreakdown, type Store, type StoreProductCandidate, type StoreSource } from '@kauppalista/domain';
 import { chromium } from 'playwright-core';
 import keskoFallbackStores from './fixtures/kesko-stores.json';
 
 export type ProductSearchRequest = {
+  runId?: string;
   storeId: string;
   query: string;
   limit?: number;
@@ -696,6 +697,57 @@ function sortCandidatesBySearchScore(candidates: StoreProductCandidate[]) {
   return [...candidates].sort((left, right) => right.searchScore - left.searchScore);
 }
 
+function summarizeSearchCandidate(candidate: StoreProductCandidate) {
+  return {
+    productId: candidate.productId,
+    name: candidate.name,
+    brand: candidate.brand ?? null,
+    size: candidate.size ?? null,
+    unit: candidate.unit ?? null,
+    price: candidate.price,
+    comparisonPrice: candidate.comparisonPrice ?? null,
+    searchScore: candidate.searchScore,
+    searchScoreBreakdown: candidate.searchScoreBreakdown,
+  };
+}
+
+function logProductSearchStarted(source: StoreSource, request: ProductSearchRequest, resolvedStoreId?: string) {
+  writeStructuredLog('info', 'product_search.started', {
+    runId: request.runId,
+    phase: 'search',
+    source,
+    storeId: request.storeId,
+    resolvedStoreId,
+    query: request.query,
+    limit: request.limit ?? null,
+  });
+}
+
+function logProductSearchCompleted(source: StoreSource, request: ProductSearchRequest, candidates: StoreProductCandidate[], resolvedStoreId?: string) {
+  writeStructuredLog('info', 'product_search.completed', {
+    runId: request.runId,
+    phase: 'search',
+    source,
+    storeId: request.storeId,
+    resolvedStoreId,
+    query: request.query,
+    candidateCount: candidates.length,
+    topCandidates: candidates.slice(0, 3).map(summarizeSearchCandidate),
+  });
+}
+
+function logProductSearchFailed(source: StoreSource, request: ProductSearchRequest, error: unknown, resolvedStoreId?: string) {
+  writeStructuredLog('error', 'product_search.failed', {
+    runId: request.runId,
+    phase: 'search',
+    source,
+    storeId: request.storeId,
+    resolvedStoreId,
+    query: request.query,
+    error,
+  });
+}
+
 function mapKeskoProduct(storeId: string, product: Record<string, unknown>): StoreProductCandidate {
   const sourceProduct = readObject(product.product) ?? product;
   const name =
@@ -1274,13 +1326,20 @@ async function fetchKeskoStoresWithBrowser(options: StoreDirectoryFetcherOptions
     };
 
     if (!((process.env.KESKO_STORE_DIRECTORY_FETCH_DETAILS ?? String(DEFAULT_KESKO_STORE_DIRECTORY_FETCH_DETAILS)) === 'true')) {
-      console.info('[sync:stores] Kesko store details skipped; using search-page directory data');
+      writeStructuredLog('info', 'store_sync.kesko_details.skipped', {
+        phase: 'store_sync',
+        source: 'k-ruoka',
+        reason: 'details_disabled',
+      });
     }
 
     if (payload.detailErrors?.length) {
-      console.warn(
-        `[sync:stores] Kesko store details partially failed; continuing with search-page data failed=${payload.detailErrors.length} first=${payload.detailErrors[0]?.id}: ${payload.detailErrors[0]?.message}`,
-      );
+      writeStructuredLog('warn', 'store_sync.kesko_details.partial_failed', {
+        phase: 'store_sync',
+        source: 'k-ruoka',
+        failed: payload.detailErrors.length,
+        firstFailure: payload.detailErrors[0] ?? null,
+      });
     }
 
     return mapKeskoStoreDirectoryPages(payload.pages ?? [], payload.detailsById ?? {});
@@ -1335,47 +1394,59 @@ export class KeskoSearcher implements ProductSearcher {
   constructor(private readonly options: KeskoSearcherOptions = {}) {}
 
   async searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult> {
-    if (!this.options.fetchImpl && !this.options.searchUrl) {
-      const signal = request.signal ?? this.options.signal;
-      const resolvedStoreId = await resolveKeskoStoreId(request.storeId, this.options, signal);
-      const rawResponse = await searchKeskoProductsWithBrowser(
-        resolvedStoreId,
-        request.query,
-        request.limit,
-        this.options,
-        signal,
-      );
+    let resolvedStoreId: string | undefined;
+    logProductSearchStarted(this.source, request);
+
+    try {
+      if (!this.options.fetchImpl && !this.options.searchUrl) {
+        const signal = request.signal ?? this.options.signal;
+        resolvedStoreId = await resolveKeskoStoreId(request.storeId, this.options, signal);
+        const rawResponse = await searchKeskoProductsWithBrowser(
+          resolvedStoreId,
+          request.query,
+          request.limit,
+          this.options,
+          signal,
+        );
+        const candidates = mapKeskoSearchResponse(request.storeId, rawResponse, request.query);
+        logProductSearchCompleted(this.source, request, candidates, resolvedStoreId);
+
+        return {
+          source: this.source,
+          storeId: request.storeId,
+          query: request.query,
+          candidates,
+          rawResponse,
+        };
+      }
+
+      const baseUrl = this.options.searchUrl ?? process.env.KESKO_PRODUCTS_URL ?? DEFAULT_KESKO_SEARCH_URL;
+      const url = new URL(baseUrl);
+      url.searchParams.set('storeId', request.storeId);
+      url.searchParams.set('q', request.query);
+      if (request.limit) {
+        url.searchParams.set('limit', String(request.limit));
+      }
+
+      const rawResponse = await fetchJson(url.toString(), {
+        fetchImpl: this.options.fetchImpl,
+        signal: request.signal ?? this.options.signal,
+        userAgent: this.options.userAgent,
+      });
+      const candidates = mapKeskoSearchResponse(request.storeId, rawResponse, request.query);
+      logProductSearchCompleted(this.source, request, candidates);
 
       return {
         source: this.source,
         storeId: request.storeId,
         query: request.query,
-        candidates: mapKeskoSearchResponse(request.storeId, rawResponse, request.query),
+        candidates,
         rawResponse,
       };
+    } catch (error) {
+      logProductSearchFailed(this.source, request, error, resolvedStoreId);
+      throw error;
     }
-
-    const baseUrl = this.options.searchUrl ?? process.env.KESKO_PRODUCTS_URL ?? DEFAULT_KESKO_SEARCH_URL;
-    const url = new URL(baseUrl);
-    url.searchParams.set('storeId', request.storeId);
-    url.searchParams.set('q', request.query);
-    if (request.limit) {
-      url.searchParams.set('limit', String(request.limit));
-    }
-
-    const rawResponse = await fetchJson(url.toString(), {
-      fetchImpl: this.options.fetchImpl,
-      signal: request.signal ?? this.options.signal,
-      userAgent: this.options.userAgent,
-    });
-
-    return {
-      source: this.source,
-      storeId: request.storeId,
-      query: request.query,
-      candidates: mapKeskoSearchResponse(request.storeId, rawResponse, request.query),
-      rawResponse,
-    };
   }
 }
 
@@ -1385,40 +1456,50 @@ export class SGroupSearcher implements ProductSearcher {
   constructor(private readonly options: SGroupSearcherOptions = {}) {}
 
   async searchProducts(request: ProductSearchRequest): Promise<ProductSearchResult> {
-    const resolvedStoreId = await resolveSGroupStoreId(request.storeId, this.options);
-    const baseUrl = this.options.searchUrl ?? process.env.S_GROUP_PRODUCTS_URL ?? DEFAULT_S_GROUP_SEARCH_URL;
+    let resolvedStoreId: string | undefined;
+    logProductSearchStarted(this.source, request);
 
-    const rawResponse = await fetchJson(baseUrl, {
-      fetchImpl: this.options.fetchImpl,
-      signal: request.signal ?? this.options.signal,
-      userAgent: this.options.userAgent,
-    }, {
-      method: 'POST',
-      headers: {
-        ...(createJsonHeaders(this.options.userAgent) as Record<string, string>),
-        accept: '*/*',
-        origin: 'https://www.s-kaupat.fi',
-        'x-client-name': 'skaupat-web',
-      },
-      body: JSON.stringify({
-        operationName: S_GROUP_PRODUCTS_OPERATION_NAME,
-        variables: {
-          storeId: resolvedStoreId,
-          queryString: request.query,
-          limit: request.limit ?? 24,
-          from: 0,
+    try {
+      resolvedStoreId = await resolveSGroupStoreId(request.storeId, this.options);
+      const baseUrl = this.options.searchUrl ?? process.env.S_GROUP_PRODUCTS_URL ?? DEFAULT_S_GROUP_SEARCH_URL;
+
+      const rawResponse = await fetchJson(baseUrl, {
+        fetchImpl: this.options.fetchImpl,
+        signal: request.signal ?? this.options.signal,
+        userAgent: this.options.userAgent,
+      }, {
+        method: 'POST',
+        headers: {
+          ...(createJsonHeaders(this.options.userAgent) as Record<string, string>),
+          accept: '*/*',
+          origin: 'https://www.s-kaupat.fi',
+          'x-client-name': 'skaupat-web',
         },
-        query: S_GROUP_PRODUCTS_QUERY,
-      }),
-    });
+        body: JSON.stringify({
+          operationName: S_GROUP_PRODUCTS_OPERATION_NAME,
+          variables: {
+            storeId: resolvedStoreId,
+            queryString: request.query,
+            limit: request.limit ?? 24,
+            from: 0,
+          },
+          query: S_GROUP_PRODUCTS_QUERY,
+        }),
+      });
+      const candidates = mapSGroupSearchResponse(request.storeId, rawResponse, request.query);
+      logProductSearchCompleted(this.source, request, candidates, resolvedStoreId);
 
-    return {
-      source: this.source,
-      storeId: request.storeId,
-      query: request.query,
-      candidates: mapSGroupSearchResponse(request.storeId, rawResponse, request.query),
-      rawResponse,
-    };
+      return {
+        source: this.source,
+        storeId: request.storeId,
+        query: request.query,
+        candidates,
+        rawResponse,
+      };
+    } catch (error) {
+      logProductSearchFailed(this.source, request, error, resolvedStoreId);
+      throw error;
+    }
   }
 }
 
@@ -1436,12 +1517,20 @@ async function loadKeskoStoresFromUrl(url: string, options: StoreDirectoryFetche
 export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {}) {
   try {
     const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
-    console.info(
-      `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
-    );
+    writeStructuredLog('info', 'store_sync.kesko.loaded', {
+      phase: 'store_sync',
+      source: 'k-ruoka',
+      storeSource: 'live-browser',
+      queries: KESKO_STORE_DIRECTORY_QUERIES,
+      storeCount: stores.length,
+    });
     return stores;
   } catch (error) {
-    console.warn('Falling back from live Kesko browser directory sync', error);
+    writeStructuredLog('warn', 'store_sync.kesko.live_failed', {
+      phase: 'store_sync',
+      source: 'k-ruoka',
+      error,
+    });
   }
 
   const keskoDirectoryUrl = options.keskoDirectoryUrl ?? process.env.KESKO_STORES_URL;
@@ -1449,23 +1538,43 @@ export async function getKeskoStores(options: StoreDirectoryFetcherOptions = {})
   if (keskoDirectoryUrl) {
     try {
       const stores = dedupeStores(await loadKeskoStoresFromUrl(keskoDirectoryUrl, options));
-      console.info(`[sync:stores] Kesko store source=remote-json-fallback stores=${stores.length} url=${keskoDirectoryUrl}`);
+      writeStructuredLog('info', 'store_sync.kesko.loaded', {
+        phase: 'store_sync',
+        source: 'k-ruoka',
+        storeSource: 'remote-json-fallback',
+        storeCount: stores.length,
+        url: keskoDirectoryUrl,
+      });
       return stores;
     } catch (error) {
-      console.warn('Falling back to bundled Kesko stores fixture', error);
+      writeStructuredLog('warn', 'store_sync.kesko.remote_fallback_failed', {
+        phase: 'store_sync',
+        source: 'k-ruoka',
+        url: keskoDirectoryUrl,
+        error,
+      });
     }
   }
 
   const stores = dedupeStores(mapKeskoFixture(keskoFallbackStores as Array<Record<string, unknown>>));
-  console.info(`[sync:stores] Kesko store source=bundled-fixture stores=${stores.length}`);
+  writeStructuredLog('info', 'store_sync.kesko.loaded', {
+    phase: 'store_sync',
+    source: 'k-ruoka',
+    storeSource: 'bundled-fixture',
+    storeCount: stores.length,
+  });
   return stores;
 }
 
 export async function getKeskoStoresLive(options: StoreDirectoryFetcherOptions = {}) {
   const stores = dedupeStores(await fetchKeskoStoresWithBrowser(options));
-  console.info(
-    `[sync:stores] Kesko store source=live-browser queries=${KESKO_STORE_DIRECTORY_QUERIES.join(',')} stores=${stores.length}`,
-  );
+  writeStructuredLog('info', 'store_sync.kesko.loaded', {
+    phase: 'store_sync',
+    source: 'k-ruoka',
+    storeSource: 'live-browser',
+    queries: KESKO_STORE_DIRECTORY_QUERIES,
+    storeCount: stores.length,
+  });
   return stores;
 }
 
@@ -1476,7 +1585,15 @@ export async function getSGroupStores(options: StoreDirectoryFetcherOptions = {}
   const shouldEnrichPages = options.sGroupEnrichPages ?? (process.env.S_GROUP_ENRICH_STORE_PAGES === 'true');
 
   if (!shouldEnrichPages) {
-    return dedupeStores(urls.map((url) => storeRecordFromSGroupUrl(url)));
+    const stores = dedupeStores(urls.map((url) => storeRecordFromSGroupUrl(url)));
+    writeStructuredLog('info', 'store_sync.s_group.loaded', {
+      phase: 'store_sync',
+      source: 's-kaupat',
+      storeSource: 'sitemap',
+      enriched: false,
+      storeCount: stores.length,
+    });
+    return stores;
   }
 
   const concurrency = Math.max(1, Math.min(options.sGroupConcurrency ?? 8, 16));
@@ -1485,12 +1602,25 @@ export async function getSGroupStores(options: StoreDirectoryFetcherOptions = {}
       const html = await fetchText(url, options);
       return parseSGroupStorePage(url, html);
     } catch (error) {
-      console.warn(`Failed to fully parse S-group store page ${url}`, error);
+      writeStructuredLog('warn', 'store_sync.s_group.page_parse_failed', {
+        phase: 'store_sync',
+        source: 's-kaupat',
+        url,
+        error,
+      });
       return storeRecordFromSGroupUrl(url);
     }
   });
 
-  return dedupeStores(stores);
+  const dedupedStores = dedupeStores(stores);
+  writeStructuredLog('info', 'store_sync.s_group.loaded', {
+    phase: 'store_sync',
+    source: 's-kaupat',
+    storeSource: 'sitemap',
+    enriched: true,
+    storeCount: dedupedStores.length,
+  });
+  return dedupedStores;
 }
 
 export function toDomainStore(record: StoreDirectoryRecord): Store {

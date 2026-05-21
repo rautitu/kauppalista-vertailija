@@ -1,5 +1,52 @@
 import { z } from 'zod';
 
+export type StructuredLogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type StructuredLogContext = Record<string, unknown>;
+
+function serializeLogValue(value: unknown, seen: WeakSet<object>): unknown {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+    };
+  }
+
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => serializeLogValue(entry, seen));
+  }
+
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+
+    seen.add(value);
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, serializeLogValue(entry, seen)]),
+    );
+  }
+
+  return value;
+}
+
+export function writeStructuredLog(level: StructuredLogLevel, event: string, context: StructuredLogContext = {}) {
+  const serializedContext = serializeLogValue(context, new WeakSet<object>());
+  const payload = {
+    timestamp: new Date().toISOString(),
+    level,
+    event,
+    ...(serializedContext && typeof serializedContext === 'object' && !Array.isArray(serializedContext)
+      ? (serializedContext as Record<string, unknown>)
+      : {}),
+  };
+
+  console.log(JSON.stringify(payload));
+}
+
 export const ServiceStateSchema = z.enum(['ok', 'error']);
 export type ServiceState = z.infer<typeof ServiceStateSchema>;
 
