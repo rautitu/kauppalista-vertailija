@@ -18,7 +18,18 @@ const COMPARISON_REQUEST_TIMEOUT_PER_TERM_MS = 80_000;
 type SavedInputs = {
   selectedKStore: StoreOption | null;
   selectedSStore: StoreOption | null;
-  searchTerms: string[];
+  searchItems: SearchInputItem[];
+  searchTerms?: string[];
+};
+
+type SearchInputItem = {
+  term: string;
+  quantity: string;
+};
+
+type SubmittedSearchItem = {
+  term: string;
+  quantity: number;
 };
 
 type ComparisonRunResponse = {
@@ -57,7 +68,7 @@ function createClientRequestId() {
 const emptyInputs: SavedInputs = {
   selectedKStore: null,
   selectedSStore: null,
-  searchTerms: [""],
+  searchItems: [{ term: "", quantity: "1" }],
 };
 
 const statusLabels: Record<MatchStatus, string> = {
@@ -81,9 +92,30 @@ function formatMoney(value: number | null | undefined) {
   return new Intl.NumberFormat("fi-FI", { style: "currency", currency: "EUR" }).format(value);
 }
 
-function normalizeTerms(terms: string[]) {
-  const trimmed = terms.map((term) => term.trim()).filter(Boolean);
-  return trimmed.length > 0 ? trimmed : [""];
+function normalizeSearchItems(savedItems?: SearchInputItem[], legacyTerms?: string[]) {
+  const sourceItems = savedItems ?? legacyTerms?.map((term) => ({ term, quantity: "1" })) ?? emptyInputs.searchItems;
+  const normalized = sourceItems
+    .map((item) => ({
+      term: item.term ?? "",
+      quantity: item.quantity && item.quantity.trim() !== "" ? item.quantity : "1",
+    }))
+    .filter((item, index, items) => item.term.trim() !== "" || index === items.length - 1);
+
+  return normalized.length > 0 ? normalized : emptyInputs.searchItems;
+}
+
+function parseQuantity(value: string) {
+  const normalized = Number(value.replace(",", "."));
+  return Number.isFinite(normalized) && normalized > 0 ? normalized : null;
+}
+
+function getSubmittedSearchItems(items: SearchInputItem[]): SubmittedSearchItem[] {
+  return items
+    .map((item) => ({
+      term: item.term.trim(),
+      quantity: parseQuantity(item.quantity),
+    }))
+    .filter((item): item is SubmittedSearchItem => item.term.length > 0 && item.quantity !== null);
 }
 
 async function readApiError(response: Response) {
@@ -270,42 +302,58 @@ function StoreSelect({
   );
 }
 
-function SearchTermsInput({ terms, onChange }: { terms: string[]; onChange: (terms: string[]) => void }) {
-  const visibleTerms = useMemo(() => {
-    const next = [...terms];
-    if (next.length === 0 || next[next.length - 1].trim() !== "") {
-      next.push("");
+function SearchTermsInput({
+  items,
+  onChange,
+}: {
+  items: SearchInputItem[];
+  onChange: (items: SearchInputItem[]) => void;
+}) {
+  const visibleItems = useMemo(() => {
+    const next = [...items];
+    if (next.length === 0 || next[next.length - 1].term.trim() !== "") {
+      next.push({ term: "", quantity: "1" });
     }
     return next;
-  }, [terms]);
+  }, [items]);
 
-  const updateTerm = useCallback(
-    (index: number, value: string) => {
-      const next = [...visibleTerms];
-      next[index] = value;
+  const updateItem = useCallback(
+    (index: number, patch: Partial<SearchInputItem>) => {
+      const next = visibleItems.map((item) => ({ ...item }));
+      next[index] = { ...next[index], ...patch };
 
-      while (next.length > 1 && next[next.length - 1].trim() === "" && next[next.length - 2].trim() === "") {
+      while (next.length > 1 && next[next.length - 1].term.trim() === "" && next[next.length - 2].term.trim() === "") {
         next.pop();
       }
 
       onChange(next);
     },
-    [onChange, visibleTerms],
+    [onChange, visibleItems],
   );
 
   return (
     <div className="field">
       <label className="field-label">Hakusanat</label>
       <div className="term-list">
-        {visibleTerms.map((term, index) => (
-          <input
-            // Index is stable enough here because rows are append-only except trailing empty cleanup.
-            key={index}
-            value={term}
-            onChange={(event) => updateTerm(index, event.target.value)}
-            placeholder={index === 0 ? "esim. Valio kevytmaito 1 l" : "Lisää hakusana"}
-            aria-label={`Hakusana ${index + 1}`}
-          />
+        {visibleItems.map((item, index) => (
+          <div className="term-row" key={index}>
+            <input
+              // Index is stable enough here because rows are append-only except trailing empty cleanup.
+              value={item.term}
+              onChange={(event) => updateItem(index, { term: event.target.value })}
+              placeholder={index === 0 ? "esim. Valio kevytmaito 1 l" : "Lisää hakusana"}
+              aria-label={`Hakusana ${index + 1}`}
+            />
+            <input
+              type="number"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              value={item.quantity}
+              onChange={(event) => updateItem(index, { quantity: event.target.value })}
+              aria-label={`Määrä ${index + 1}`}
+            />
+          </div>
         ))}
       </div>
     </div>
@@ -330,6 +378,15 @@ function ProductCell({ label, match }: { label: string; match: ComparisonRunItem
       )}
     </div>
   );
+}
+
+function getRowQuantity(row: ComparisonRunItem) {
+  const quantity = (row.canonicalItem as ComparisonRunItem["canonicalItem"] & { quantity?: number }).quantity;
+  return typeof quantity === "number" && Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+}
+
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat("fi-FI", { maximumFractionDigits: 3 }).format(value);
 }
 
 function ResultsView({ run }: { run: ComparisonRunResponse }) {
@@ -376,6 +433,7 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
               <div>
                 <span className="row-index">{index + 1}</span>
                 <strong>{row.canonicalItem.name}</strong>
+                <span className="quantity-pill">× {formatQuantity(getRowQuantity(row))}</span>
               </div>
               <span className={`status-pill status-${row.status}`}>{statusLabels[row.status]}</span>
             </div>
@@ -420,7 +478,7 @@ function ComparisonProgressView({ progress }: { progress: ComparisonProgress }) 
 export default function HomePage() {
   const [selectedKStore, setSelectedKStore] = useState<StoreOption | null>(emptyInputs.selectedKStore);
   const [selectedSStore, setSelectedSStore] = useState<StoreOption | null>(emptyInputs.selectedSStore);
-  const [searchTerms, setSearchTerms] = useState<string[]>(emptyInputs.searchTerms);
+  const [searchItems, setSearchItems] = useState<SearchInputItem[]>(emptyInputs.searchItems);
   const [result, setResult] = useState<ComparisonRunResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -438,7 +496,7 @@ export default function HomePage() {
       const saved = JSON.parse(raw) as Partial<SavedInputs>;
       setSelectedKStore(normalizeSavedStoreOption(saved.selectedKStore, "k-ruoka"));
       setSelectedSStore(normalizeSavedStoreOption(saved.selectedSStore, "s-kaupat"));
-      setSearchTerms(normalizeTerms(saved.searchTerms ?? [""]));
+      setSearchItems(normalizeSearchItems(saved.searchItems, saved.searchTerms));
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
     } finally {
@@ -454,13 +512,15 @@ export default function HomePage() {
     const payload: SavedInputs = {
       selectedKStore,
       selectedSStore,
-      searchTerms: normalizeTerms(searchTerms),
+      searchItems: normalizeSearchItems(searchItems),
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-  }, [hasLoadedSavedInputs, selectedKStore, selectedSStore, searchTerms]);
+  }, [hasLoadedSavedInputs, selectedKStore, selectedSStore, searchItems]);
 
-  const submittedTerms = searchTerms.map((term) => term.trim()).filter(Boolean);
-  const canSubmit = Boolean(selectedKStore?.storeId && selectedSStore?.storeId && submittedTerms.length > 0 && !isSubmitting);
+  const submittedItems = getSubmittedSearchItems(searchItems);
+  const submittedTerms = submittedItems.map((item) => item.term);
+  const hasInvalidQuantities = searchItems.some((item) => item.term.trim().length > 0 && parseQuantity(item.quantity) === null);
+  const canSubmit = Boolean(selectedKStore?.storeId && selectedSStore?.storeId && submittedItems.length > 0 && !hasInvalidQuantities && !isSubmitting);
 
   async function submitComparison(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -474,12 +534,12 @@ export default function HomePage() {
       status: "running",
     });
 
-    if (!selectedKStore || !selectedSStore || submittedTerms.length === 0) {
-      setError("Valitse molemmat kaupat ja lisää vähintään yksi hakusana.");
+    if (!selectedKStore || !selectedSStore || submittedItems.length === 0 || hasInvalidQuantities) {
+      setError("Valitse molemmat kaupat, lisää vähintään yksi hakusana ja käytä positiivisia määriä.");
       logProgress({
         percent: 0,
         label: "Vertailu keskeytyi",
-        detail: "Valitse molemmat kaupat ja lisää vähintään yksi hakusana.",
+        detail: "Valitse molemmat kaupat, lisää vähintään yksi hakusana ja käytä positiivisia määriä.",
         status: "error",
       });
       return;
@@ -510,7 +570,7 @@ export default function HomePage() {
           clientRequestId,
           selectedKStoreId: selectedKStore.storeId,
           selectedSStoreId: selectedSStore.storeId,
-          searchTerms: submittedTerms,
+          searchItems: submittedItems,
         }),
       });
 
@@ -564,7 +624,7 @@ export default function HomePage() {
           <StoreSelect label="S-kaupat kauppa" source="s-kaupat" selected={selectedSStore} onSelect={setSelectedSStore} />
         </div>
 
-        <SearchTermsInput terms={searchTerms} onChange={setSearchTerms} />
+        <SearchTermsInput items={searchItems} onChange={setSearchItems} />
 
         {error ? <div className="alert">{error}</div> : null}
 
@@ -572,7 +632,7 @@ export default function HomePage() {
           <button type="submit" disabled={!canSubmit}>
             {isSubmitting ? "Vertaillaan…" : "Suorita vertailu"}
           </button>
-          <span>{submittedTerms.length} hakusanaa</span>
+          <span>{submittedItems.length} hakusanaa</span>
         </div>
       </form>
 

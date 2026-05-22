@@ -69,6 +69,7 @@ const NonEmptyStringSchema = z.string().trim().min(1);
 const OptionalTextSchema = z.string().trim().min(1).nullable().optional();
 const OptionalPositiveNumberSchema = z.number().positive().nullable().optional();
 const MoneySchema = z.number().nonnegative();
+const QuantitySchema = z.number().positive();
 
 export const SearchScoreBreakdownSchema = z.object({
   normalizedQuery: z.string(),
@@ -94,6 +95,11 @@ export const CanonicalItemSchema = z.object({
   aliases: z.array(NonEmptyStringSchema).default([]),
 });
 export type CanonicalItem = z.infer<typeof CanonicalItemSchema>;
+
+export const ShoppingListItemSchema = CanonicalItemSchema.extend({
+  quantity: QuantitySchema.default(1),
+});
+export type ShoppingListItem = z.infer<typeof ShoppingListItemSchema>;
 
 export const StoreSchema = z.object({
   source: StoreSourceSchema,
@@ -144,7 +150,7 @@ export const CrossStoreValidationResultSchema = z.object({
 export type CrossStoreValidationResult = z.infer<typeof CrossStoreValidationResultSchema>;
 
 export const ComparisonRunItemSchema = z.object({
-  canonicalItem: CanonicalItemSchema,
+  canonicalItem: ShoppingListItemSchema,
   kMatch: ProductMatchSchema.nullable(),
   sMatch: ProductMatchSchema.nullable(),
   status: MatchStatusSchema,
@@ -170,7 +176,7 @@ export const ComparisonRunSchema = z.object({
   selectedSStore: StoreSchema.refine((store) => store.source === 's-kaupat', {
     message: 'selectedSStore must use source s-kaupat',
   }),
-  inputShoppingList: z.array(CanonicalItemSchema),
+  inputShoppingList: z.array(ShoppingListItemSchema),
   matchedRows: z.array(ComparisonRunItemSchema),
   totals: ComparisonRunTotalsSchema,
   createdAt: z.coerce.date(),
@@ -199,8 +205,19 @@ export type CreateCanonicalItemRequest = z.infer<typeof CreateCanonicalItemReque
 export const CreateComparisonRunRequestSchema = z.object({
   selectedKStoreId: NonEmptyStringSchema,
   selectedSStoreId: NonEmptyStringSchema,
-  searchTerms: z.array(NonEmptyStringSchema).min(1),
+  searchTerms: z.array(NonEmptyStringSchema).optional(),
+  searchItems: z
+    .array(
+      z.object({
+        term: NonEmptyStringSchema,
+        quantity: QuantitySchema.default(1),
+      }),
+    )
+    .optional(),
   clientRequestId: NonEmptyStringSchema.optional(),
+}).refine((request) => (request.searchItems?.length ?? request.searchTerms?.length ?? 0) > 0, {
+  message: 'searchItems or searchTerms must contain at least one item.',
+  path: ['searchItems'],
 });
 export type CreateComparisonRunRequest = z.infer<typeof CreateComparisonRunRequestSchema>;
 

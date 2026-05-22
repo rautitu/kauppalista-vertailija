@@ -201,6 +201,16 @@ input:focus {
   gap: 8px;
 }
 
+.term-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  gap: 8px;
+}
+
+.term-row input[type="number"] {
+  text-align: right;
+}
+
 .store-grid + .field {
   margin-top: 18px;
 }
@@ -423,7 +433,8 @@ input:focus {
 }
 
 .row-index,
-.source-label {
+.source-label,
+.quantity-pill {
   align-items: center;
   background: var(--bg-panel-strong);
   border-radius: 5px;
@@ -434,6 +445,11 @@ input:focus {
   justify-content: center;
   min-width: 24px;
   padding: 3px 6px;
+}
+
+.quantity-pill {
+  color: var(--yellow);
+  white-space: nowrap;
 }
 
 .product-grid {
@@ -485,6 +501,7 @@ input:focus {
   }
 
   .store-grid,
+  .term-row,
   .totals,
   .product-grid {
     grid-template-columns: 1fr;

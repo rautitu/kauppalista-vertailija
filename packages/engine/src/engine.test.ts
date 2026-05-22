@@ -69,7 +69,7 @@ describe('phase 9 comparison engine', () => {
       address: 'Koivistontie 1',
     };
 
-    const shoppingList: CanonicalItem[] = [
+    const shoppingList: Array<CanonicalItem & { quantity?: number }> = [
       {
         id: 'item-milk-1l',
         name: 'Kevytmaito',
@@ -80,6 +80,7 @@ describe('phase 9 comparison engine', () => {
         category: 'milk',
         synonyms: [],
         aliases: [],
+        quantity: 2,
       },
       {
         id: 'item-banana-1kg',
@@ -91,6 +92,7 @@ describe('phase 9 comparison engine', () => {
         category: 'fruit',
         synonyms: [],
         aliases: [],
+        quantity: 0.5,
       },
     ];
 
@@ -167,9 +169,9 @@ describe('phase 9 comparison engine', () => {
     expect(result.comparisonRun.id).toBe('phase9-run-1');
     expect(result.comparisonRun.matchedRows).toHaveLength(2);
     expect(result.comparisonRun.totals).toEqual({
-      kTotal: 3.58,
-      sTotal: 3.38,
-      difference: 0.2,
+      kTotal: 4.18,
+      sTotal: 3.93,
+      difference: 0.25,
       matchedItems: 2,
       ambiguousItems: 0,
       missingItems: 0,
@@ -178,7 +180,7 @@ describe('phase 9 comparison engine', () => {
     const persisted = await db.getComparisonRunWithItems('phase9-run-1');
     expect(persisted?.items).toHaveLength(2);
     expect(persisted?.logs).toHaveLength(4);
-    expect(persisted?.totals).toMatchObject({ kTotal: 3.58, sTotal: 3.38 });
+    expect(persisted?.totals).toMatchObject({ kTotal: 4.18, sTotal: 3.93 });
   });
 
   test('persists the strongest cross-store pair while marking unresolved status', async () => {

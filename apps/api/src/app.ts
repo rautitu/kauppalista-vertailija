@@ -4,11 +4,11 @@ import { createComparisonEngine } from '@kauppalista/engine';
 import { KeskoSearcher, SGroupSearcher, type ProductSearcher } from '@kauppalista/searchers';
 import { checkDatabaseHealth, createDatabase, type StoreRecord } from '@kauppalista/db';
 import {
-  CanonicalItemSchema,
   CreateCanonicalItemRequestSchema,
   CreateComparisonRunRequestSchema,
-  type CanonicalItem,
   type HealthStatus,
+  ShoppingListItemSchema,
+  type ShoppingListItem,
   type StoreSource,
   writeStructuredLog,
 } from '@kauppalista/domain';
@@ -102,9 +102,11 @@ function slugify(value: string) {
     .slice(0, 80);
 }
 
-function toInputCanonicalItems(searchTerms: string[]): CanonicalItem[] {
-  return searchTerms.map((term, index) =>
-    CanonicalItemSchema.parse({
+function toInputCanonicalItems(
+  searchItems: Array<{ term: string; quantity?: number }>,
+): ShoppingListItem[] {
+  return searchItems.map(({ term, quantity }, index) =>
+    ShoppingListItemSchema.parse({
       id: `input-${slugify(term) || `item-${index + 1}`}`,
       name: term,
       brand: null,
@@ -114,8 +116,16 @@ function toInputCanonicalItems(searchTerms: string[]): CanonicalItem[] {
       category: null,
       synonyms: [],
       aliases: [],
+      quantity: quantity ?? 1,
     }),
   );
+}
+
+function getRequestSearchItems(request: {
+  searchItems?: Array<{ term: string; quantity?: number }>;
+  searchTerms?: string[];
+}) {
+  return request.searchItems ?? request.searchTerms?.map((term) => ({ term, quantity: 1 })) ?? [];
 }
 
 async function getStore(db: Database, id: string, expectedSource: StoreSource) {
@@ -311,13 +321,15 @@ export function createApiApp(deps: ApiDependencies = {}) {
     }
 
     const request = parsed.data;
+    const searchItems = getRequestSearchItems(request);
     writeStructuredLog('info', 'api.comparison_run.request_received', {
       phase: 'api',
       clientRequestId: request.clientRequestId,
       selectedKStoreId: request.selectedKStoreId,
       selectedSStoreId: request.selectedSStoreId,
-      searchTermCount: request.searchTerms.length,
-      searchTerms: request.searchTerms,
+      searchTermCount: searchItems.length,
+      searchTerms: searchItems.map((item) => item.term),
+      searchItems,
     });
 
     const [kStore, sStore] = await Promise.all([
@@ -355,7 +367,7 @@ export function createApiApp(deps: ApiDependencies = {}) {
       result = await engine.runComparison({
         selectedKStore: toDomainStore(kStore),
         selectedSStore: toDomainStore(sStore),
-        shoppingList: toInputCanonicalItems(request.searchTerms),
+        shoppingList: toInputCanonicalItems(searchItems),
       });
     } catch (error) {
       writeStructuredLog('error', 'api.comparison_run.failed', {

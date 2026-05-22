@@ -6,10 +6,11 @@ import type {
   ProductMatch,
   Store,
   CanonicalItem,
+  ShoppingListItem,
   MatchStatus,
   StoreProductCandidate,
 } from '../../domain/src/index';
-import { ComparisonRunSchema, writeStructuredLog } from '../../domain/src/index';
+import { ComparisonRunSchema, ShoppingListItemSchema, writeStructuredLog } from '../../domain/src/index';
 import type { createDatabase } from '../../db/src/index';
 import {
   findBestCandidateMatch,
@@ -28,7 +29,7 @@ export type ComparisonEngineDependencies = {
 export type RunComparisonInput = {
   selectedKStore: Store;
   selectedSStore: Store;
-  shoppingList: CanonicalItem[];
+  shoppingList: Array<CanonicalItem & { quantity?: number }>;
 };
 
 export type ComparisonSearchLog = {
@@ -79,6 +80,14 @@ function buildQuery(item: CanonicalItem) {
     .filter((value) => value !== null && value !== undefined && String(value).trim().length > 0)
     .join(' ')
     .trim();
+}
+
+function getItemQuantity(item: ShoppingListItem) {
+  return Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1;
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function getProductSearchTimeoutMs() {
@@ -191,13 +200,13 @@ function deriveRowStatus(
 }
 
 function createTotals(rows: ComparisonRunItem[]): ComparisonRunTotals {
-  const kTotal = rows.reduce((sum, row) => sum + (row.kMatch?.candidate?.price ?? 0), 0);
-  const sTotal = rows.reduce((sum, row) => sum + (row.sMatch?.candidate?.price ?? 0), 0);
+  const kTotal = rows.reduce((sum, row) => sum + (row.kMatch?.candidate?.price ?? 0) * getItemQuantity(row.canonicalItem), 0);
+  const sTotal = rows.reduce((sum, row) => sum + (row.sMatch?.candidate?.price ?? 0) * getItemQuantity(row.canonicalItem), 0);
 
   return {
-    kTotal: Number(kTotal.toFixed(2)),
-    sTotal: Number(sTotal.toFixed(2)),
-    difference: Number((kTotal - sTotal).toFixed(2)),
+    kTotal: roundMoney(kTotal),
+    sTotal: roundMoney(sTotal),
+    difference: roundMoney(kTotal - sTotal),
     matchedItems: rows.filter((row) => row.status === 'matched').length,
     ambiguousItems: rows.filter((row) => row.status === 'ambiguous').length,
     missingItems: rows.filter((row) => row.status === 'not_found' || row.status === 'mismatch').length,
@@ -248,7 +257,9 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
       });
 
       try {
-      for (const [itemIndex, item] of input.shoppingList.entries()) {
+      const shoppingList = input.shoppingList.map((item) => ShoppingListItemSchema.parse(item));
+
+      for (const [itemIndex, item] of shoppingList.entries()) {
         const query = buildQuery(item);
         writeStructuredLog('info', 'comparison.item.search_started', {
           runId,
@@ -337,14 +348,14 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
           crossStoreValidation,
         });
 
-        if (itemIndex < input.shoppingList.length - 1) {
+        if (itemIndex < shoppingList.length - 1) {
           const delayMs = getProductSearchDelayMs();
           writeStructuredLog('info', 'comparison.item.search_delay', {
             runId,
             phase: 'search',
             delayMs,
             completedItemId: item.id,
-            nextItemId: input.shoppingList[itemIndex + 1]?.id,
+            nextItemId: shoppingList[itemIndex + 1]?.id,
           });
           await wait(delayMs);
         }
@@ -359,7 +370,7 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         totals,
       });
 
-      for (const item of input.shoppingList) {
+      for (const item of shoppingList) {
         await deps.db.createCanonicalItem({
           id: item.id,
           name: item.name,
@@ -379,7 +390,7 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         id: runId,
         selectedKStoreId: input.selectedKStore.storeId,
         selectedSStoreId: input.selectedSStore.storeId,
-        inputShoppingList: input.shoppingList,
+        inputShoppingList: shoppingList,
         totals,
       });
 
@@ -430,7 +441,7 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
           sMatchId,
           priceDifference:
             row.kMatch?.candidate && row.sMatch?.candidate
-              ? Number((row.kMatch.candidate.price - row.sMatch.candidate.price).toFixed(2))
+              ? roundMoney((row.kMatch.candidate.price - row.sMatch.candidate.price) * getItemQuantity(row.canonicalItem))
               : null,
           notes: row.crossStoreValidation?.status === 'mismatch' ? row.crossStoreValidation.reason : null,
         });
@@ -446,7 +457,7 @@ export function createComparisonEngine(deps: ComparisonEngineDependencies) {
         id: runId,
         selectedKStore: input.selectedKStore,
         selectedSStore: input.selectedSStore,
-        inputShoppingList: input.shoppingList,
+        inputShoppingList: shoppingList,
         matchedRows: rows,
         totals,
         createdAt,
