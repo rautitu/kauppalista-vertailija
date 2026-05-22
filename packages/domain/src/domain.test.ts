@@ -24,6 +24,46 @@ describe('domain schemas', () => {
     expect(item.aliases).toEqual([]);
   });
 
+  test('parses shopping list quantities and defaults to one', () => {
+    const run = ComparisonRunSchema.parse({
+      id: 'run-quantity',
+      selectedKStore: {
+        source: 'k-ruoka',
+        storeId: 'k-1',
+        storeName: 'K-Citymarket Lielahti',
+      },
+      selectedSStore: {
+        source: 's-kaupat',
+        storeId: 's-1',
+        storeName: 'Prisma Koivistonkylä',
+      },
+      inputShoppingList: [
+        {
+          id: 'item-milk',
+          name: 'Kevytmaito',
+          quantity: 2.5,
+        },
+        {
+          id: 'item-banana',
+          name: 'Banaani',
+        },
+      ],
+      matchedRows: [],
+      totals: {
+        kTotal: 0,
+        sTotal: 0,
+        difference: 0,
+        matchedItems: 0,
+        ambiguousItems: 0,
+        missingItems: 0,
+      },
+      createdAt: '2026-04-27T09:00:00.000Z',
+      updatedAt: '2026-04-27T09:00:00.000Z',
+    });
+
+    expect(run.inputShoppingList.map((item) => item.quantity)).toEqual([2.5, 1]);
+  });
+
   test('rejects invalid store source', () => {
     const result = StoreSchema.safeParse({
       source: 'lidl',
