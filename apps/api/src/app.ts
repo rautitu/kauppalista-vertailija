@@ -140,6 +140,9 @@ function toDomainStore(store: StoreRecord) {
 function createStoreIdMappedSearcher(searcher: ProductSearcher, store: StoreRecord): ProductSearcher {
   return {
     source: searcher.source,
+    async close() {
+      await searcher.close?.();
+    },
     async searchProducts(request) {
       const result = await searcher.searchProducts({
         ...request,
