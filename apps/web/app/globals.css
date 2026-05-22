@@ -203,11 +203,17 @@ input:focus {
 
 .term-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 118px;
+  grid-template-columns: minmax(0, 1fr) clamp(76px, 22vw, 118px);
   gap: 8px;
 }
 
+.term-row input {
+  min-width: 0;
+}
+
 .term-row input[type="number"] {
+  padding-left: 8px;
+  padding-right: 8px;
   text-align: right;
 }
 
@@ -501,7 +507,6 @@ input:focus {
   }
 
   .store-grid,
-  .term-row,
   .totals,
   .product-grid {
     grid-template-columns: 1fr;
