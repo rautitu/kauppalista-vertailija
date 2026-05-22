@@ -9,6 +9,7 @@ import {
   resolveSelectedStoreOption,
   type StoreOption,
 } from "./store-selection";
+import { scheduleItemProgress, type ComparisonProgress } from "./comparison-progress";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/$/, "");
 const STORAGE_KEY = "kauppalista-vertailija:mvp-inputs";
@@ -29,13 +30,6 @@ type ComparisonRunResponse = {
 
 type ApiErrorResponse = {
   error?: string;
-};
-
-type ComparisonProgress = {
-  percent: number;
-  label: string;
-  detail: string;
-  status: "idle" | "running" | "complete" | "error";
 };
 
 const idleProgress: ComparisonProgress = {
@@ -499,11 +493,12 @@ export default function HomePage() {
       () => controller.abort(new Error(`Vertailupyyntö aikakatkaistiin ${Math.round(timeoutMs / 1000)} sekunnin jälkeen.`)),
       timeoutMs,
     );
+    const stopItemProgress = scheduleItemProgress(submittedTerms, logProgress);
     try {
       logProgress({
-        percent: 20,
+        percent: 10,
         label: "Lähetetään vertailu",
-        detail: "Lähetetään vertailu valituilla kaupoilla.",
+        detail: "Lähetetään vertailu valituilla kaupoilla ja hakusanoilla.",
         status: "running",
       });
 
@@ -548,6 +543,7 @@ export default function HomePage() {
         status: "error",
       });
     } finally {
+      stopItemProgress();
       window.clearTimeout(timeoutId);
       setIsSubmitting(false);
     }
