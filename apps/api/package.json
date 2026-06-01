@@ -14,7 +14,7 @@
     "@kauppalista/domain": "workspace:*",
     "@kauppalista/engine": "workspace:*",
     "@kauppalista/searchers": "workspace:*",
-    "hono": "^4.10.1"
+    "hono": "4.12.18"
   },
   "devDependencies": {
     "bun-types": "^1.3.9",
