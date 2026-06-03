@@ -391,22 +391,47 @@ function formatQuantity(value: number) {
 
 function ResultsView({ run }: { run: ComparisonRunResponse }) {
   const rows = run.matchedRows ?? run.items ?? [];
+  const [activeStatuses, setActiveStatuses] = useState<Set<MatchStatus>>(() => new Set(statusOrder));
   const counts = statusOrder.reduce(
     (acc, status) => ({ ...acc, [status]: rows.filter((row) => row.status === status).length }),
     {} as Record<MatchStatus, number>,
   );
+  const filteredRows = rows.filter((row) => activeStatuses.has(row.status));
+
+  useEffect(() => {
+    setActiveStatuses(new Set(statusOrder));
+  }, [run.id]);
+
+  const toggleStatus = useCallback((status: MatchStatus) => {
+    setActiveStatuses((currentStatuses) => {
+      const nextStatuses = new Set(currentStatuses);
+      if (nextStatuses.has(status)) {
+        nextStatuses.delete(status);
+      } else {
+        nextStatuses.add(status);
+      }
+      return nextStatuses;
+    });
+  }, []);
 
   return (
     <section className="results">
       <div className="section-heading">
         <div>
           <h2>Vertailun tulos</h2>
+          <p>Näytetään {filteredRows.length}/{rows.length} riviä.</p>
         </div>
         <div className="status-summary">
           {statusOrder.map((status) => (
-            <span className={`status-pill status-${status}`} key={status}>
+            <button
+              className={`status-filter status-pill status-${status}${activeStatuses.has(status) ? "" : " is-inactive"}`}
+              type="button"
+              aria-pressed={activeStatuses.has(status)}
+              onClick={() => toggleStatus(status)}
+              key={status}
+            >
               {statusLabels[status]} {counts[status]}
-            </span>
+            </button>
           ))}
         </div>
       </div>
@@ -427,7 +452,7 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
       </div>
 
       <div className="result-list">
-        {rows.map((row, index) => (
+        {filteredRows.map((row, index) => (
           <article className="result-row" key={row.canonicalItem.id}>
             <div className="result-header">
               <div>
@@ -449,6 +474,9 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
             ) : null}
           </article>
         ))}
+        {filteredRows.length === 0 ? (
+          <div className="empty-results">Ei näytettäviä rivejä valituilla match-tyypeillä.</div>
+        ) : null}
       </div>
     </section>
   );
