@@ -10,6 +10,7 @@ import {
   type StoreOption,
 } from "./store-selection";
 import { scheduleItemProgress, type ComparisonProgress } from "./comparison-progress";
+import { calculateComparisonTotals } from "./comparison-totals";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/$/, "");
 const STORAGE_KEY = "kauppalista-vertailija:mvp-inputs";
@@ -397,6 +398,7 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
     {} as Record<MatchStatus, number>,
   );
   const filteredRows = rows.filter((row) => activeStatuses.has(row.status));
+  const filteredTotals = useMemo(() => calculateComparisonTotals(filteredRows), [filteredRows]);
 
   useEffect(() => {
     setActiveStatuses(new Set(statusOrder));
@@ -439,15 +441,15 @@ function ResultsView({ run }: { run: ComparisonRunResponse }) {
       <div className="totals">
         <div>
           <span>K-ruoka yhteensä</span>
-          <strong>{formatMoney(run.totals.kTotal)}</strong>
+          <strong>{formatMoney(filteredTotals.kTotal)}</strong>
         </div>
         <div>
           <span>S-kaupat yhteensä</span>
-          <strong>{formatMoney(run.totals.sTotal)}</strong>
+          <strong>{formatMoney(filteredTotals.sTotal)}</strong>
         </div>
         <div>
           <span>Erotus</span>
-          <strong>{formatMoney(run.totals.difference)}</strong>
+          <strong>{formatMoney(filteredTotals.difference)}</strong>
         </div>
       </div>
 
