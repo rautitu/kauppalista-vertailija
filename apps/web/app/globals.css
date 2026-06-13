@@ -354,12 +354,30 @@ input:focus {
 .status-pill {
   align-items: center;
   border-radius: 999px;
+  border: 0;
   display: inline-flex;
   font-size: 0.78rem;
   font-weight: 750;
   min-height: 25px;
   padding: 3px 9px;
   white-space: nowrap;
+}
+
+.status-filter {
+  cursor: pointer;
+  outline: none;
+}
+
+.status-filter:hover,
+.status-filter:focus {
+  box-shadow: 0 0 0 3px rgba(139, 233, 253, 0.18);
+}
+
+.status-filter.is-inactive {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 2px 8px;
 }
 
 .status-matched {
@@ -410,6 +428,14 @@ input:focus {
 .result-list {
   display: grid;
   gap: 10px;
+}
+
+.empty-results {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  padding: 16px;
+  text-align: center;
 }
 
 .result-row {
