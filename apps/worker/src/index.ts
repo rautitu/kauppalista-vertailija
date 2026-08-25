@@ -21,7 +21,7 @@ export async function syncStoreDirectory() {
   writeStructuredLog('info', 'worker.store_sync.started', {
     phase: 'store_sync',
   });
-  const [keskoResult, sGroupStores] = await Promise.all([
+  const [keskoResult, sGroupResult] = await Promise.all([
     getKeskoStoresLive()
       .then((stores) => ({ stores }))
       .catch((error) => {
@@ -32,16 +32,26 @@ export async function syncStoreDirectory() {
         });
         return { stores: null };
       }),
-    getSGroupStores(),
+    getSGroupStores()
+      .then((stores) => ({ stores }))
+      .catch((error) => {
+        writeStructuredLog('warn', 'worker.store_sync.s_group_failed_preserving_existing', {
+          phase: 'store_sync',
+          source: 's-kaupat',
+          error,
+        });
+        return { stores: null };
+      }),
   ]);
   writeStructuredLog('info', 'worker.store_sync.directories_loaded', {
     phase: 'store_sync',
     counts: {
       kesko: keskoResult.stores?.length ?? null,
-      sGroup: sGroupStores.length,
+      sGroup: sGroupResult.stores?.length ?? null,
     },
     preservedExisting: {
       kesko: keskoResult.stores === null,
+      sGroup: sGroupResult.stores === null,
     },
   });
 
@@ -74,28 +84,38 @@ export async function syncStoreDirectory() {
     });
   }
 
-  const sGroupResult = await db.syncStores(
-    's-kaupat',
-    sGroupStores.map((store) => ({
-      source: store.source,
-      externalId: store.externalId,
-      name: store.storeName,
-      city: store.city ?? null,
-      address: store.address ?? null,
-      postalCode: store.postalCode ?? null,
-      isActive: store.isActive ?? true,
-      metadata: store.metadata ?? {},
-    })),
-  );
-  writeStructuredLog('info', 'worker.store_sync.db_written', {
-    phase: 'store_sync',
-    source: 's-kaupat',
-    synced: sGroupResult.synced,
-  });
+  let sGroupSynced: number | null = null;
+  if (sGroupResult.stores) {
+    const synced = await db.syncStores(
+      's-kaupat',
+      sGroupResult.stores.map((store) => ({
+        source: store.source,
+        externalId: store.externalId,
+        name: store.storeName,
+        city: store.city ?? null,
+        address: store.address ?? null,
+        postalCode: store.postalCode ?? null,
+        isActive: store.isActive ?? true,
+        metadata: store.metadata ?? {},
+      })),
+    );
+    sGroupSynced = synced.synced;
+    writeStructuredLog('info', 'worker.store_sync.db_written', {
+      phase: 'store_sync',
+      source: 's-kaupat',
+      synced: synced.synced,
+    });
+  } else {
+    writeStructuredLog('warn', 'worker.store_sync.db_write_skipped', {
+      phase: 'store_sync',
+      source: 's-kaupat',
+      reason: 'preserving_existing_rows',
+    });
+  }
 
   return {
     kesko: keskoSynced,
-    sGroup: sGroupResult.synced,
+    sGroup: sGroupSynced,
   };
 }
 
